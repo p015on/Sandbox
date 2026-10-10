@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Śluza</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend:wght@600;800&family=Nunito:wght@400;600;800&display=swap">
+<style>
+/* Layout: map game — header with stats, one-line hint, the terrain canvas, a tool bar (dig / dam / fill + open the sluice), a small secondary bar */
+:root{
+  --bg:#eef1e6; --ink:#233027; --muted:#66746a; --card:#fbfcf7; --chip:#e1e7d6;
+  --water:#3b86d1; --soil:#8a6a44; --accent:#2f7fc4; --bad:#cf4b3c; --ok:#3d9a55;
+  --display:"Lexend", "Avenir Next", system-ui, sans-serif;
+  --body:"Nunito", system-ui, -apple-system, sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#171d19; --ink:#e7ece6; --muted:#9aa89e; --card:#222a24; --chip:#2c352f;
+  --water:#5aa2e6; --soil:#b08a5c; --accent:#5aa2e6; --bad:#ec6b5b; --ok:#5cbb75; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#171d19; --ink:#e7ece6; --muted:#9aa89e; --card:#222a24; --chip:#2c352f;
+  --water:#5aa2e6; --soil:#b08a5c; --accent:#5aa2e6; --bad:#ec6b5b; --ok:#5cbb75; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);overflow:hidden;margin:0;
+  display:flex;flex-direction:column;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);overscroll-behavior:none}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:12px 16px 2px}
+h1{font-family:var(--display);font-weight:800;font-size:1.6rem;line-height:1;margin:0;color:var(--accent);letter-spacing:-.01em}
+.stats{display:flex;gap:14px;font-variant-numeric:tabular-nums;text-align:right}
+.stat b{display:block;font-size:1.2rem;font-weight:800;line-height:1}
+.stat span{font-size:.64rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.hint{padding:6px 16px 4px;font-size:.84rem;color:var(--muted);min-height:2.6em;line-height:1.35}
+#wrap{position:relative;flex:1;min-height:0;margin:0 16px}
+canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
+.tools{display:flex;gap:8px;padding:8px 16px 0;align-items:center;flex-wrap:wrap}
+.seg{display:flex;background:var(--chip);border-radius:999px;padding:3px;gap:2px}
+.seg button{background:transparent;box-shadow:none;padding:8px 13px}
+.seg button[aria-pressed="true"]{background:var(--card);box-shadow:0 1px 2px rgba(0,0,0,.12);outline:none}
+.bar{display:flex;gap:8px;padding:8px 16px 14px;flex-wrap:wrap}
+button{font:inherit;font-weight:800;border:0;border-radius:999px;padding:10px 15px;cursor:pointer;background:var(--card);color:var(--ink);box-shadow:0 1px 0 rgba(0,0,0,.08)}
+button.primary{background:var(--accent);color:#fff;margin-left:auto}
+button:disabled{opacity:.45;cursor:default}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.small{padding:8px 13px;font-size:.88rem}
+button.small[aria-pressed="true"]{outline:2px solid var(--accent)}
+.overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:16px}
+.card{background:var(--card);border-radius:20px;padding:20px;max-width:340px;width:100%;text-align:center;box-shadow:0 18px 44px rgba(0,0,0,.25)}
+.card h2{font-family:var(--display);font-weight:800;font-size:1.45rem;margin:0 0 6px;color:var(--accent);text-wrap:balance}
+.card p{margin:0 0 14px;color:var(--muted);line-height:1.45}
+.card .row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.card .row button.primary{margin-left:0}
+.stars{font-size:1.6rem;letter-spacing:.2em;color:#e1a73b;margin-bottom:4px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Śluza</h1>
+  <div class="stats">
+    <div class="stat"><b id="s-level">1</b><span>mapa</span></div>
+    <div class="stat"><b id="s-shovel">0/0</b><span>łopaty</span></div>
+    <div class="stat"><b id="s-fields">0/0</b><span>pola</span></div>
+  </div>
+</header>
+<div class="hint" id="hint"></div>
+<div id="wrap">
+  <canvas id="c" aria-label="Mapa terenu ze źródłem, polami i domami"></canvas>
+  <div class="overlay" id="result" hidden>
+    <div class="card">
+      <div class="stars" id="r-stars"></div>
+      <h2 id="r-title"></h2>
+      <p id="r-text"></p>
+      <div class="row" id="r-row"></div>
+    </div>
+  </div>
+</div>
+<div class="tools">
+  <div class="seg" role="group" aria-label="Narzędzie">
+    <button id="t-dig" aria-pressed="true">Kop</button>
+    <button id="t-dam" aria-pressed="false">Tama</button>
+    <button id="t-fill" aria-pressed="false">Zasyp</button>
+  </div>
+  <button class="primary" id="b-open">Otwórz śluzę</button>
+</div>
+<div class="bar">
+  <button class="small" id="b-slope" aria-pressed="false">Spadki</button>
+  <button class="small" id="b-clear">Wyczyść</button>
+  <button class="small" id="b-new">Inna mapa</button>
+</div>
+
+<script>
+// SLUZA-CORE: terrain, level generation and water simulation (no DOM)
+const GW=20, GH=28, DIG=0.8, DAM=1.6;
+function rng(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed);
+  t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+const idx=(x,y)=>y*GW+x;
+const inb=(x,y)=>x>=0&&y>=0&&x<GW&&y<GH;
+
+function makeNoise(R,cells){ // value noise on a coarse grid, bilinear
+  const g=[]; for(let i=0;i<(Math.ceil(GW/cells)+2)*(Math.ceil(GH/cells)+2);i++) g.push(R());
+  const cw=Math.ceil(GW/cells)+2;
+  return (x,y)=>{ const fx=x/cells, fy=y/cells, ix=Math.floor(fx), iy=Math.floor(fy), tx=fx-ix, ty=fy-iy;
+    const s=t=>t*t*(3-2*t), a=g[iy*cw+ix], b=g[iy*cw+ix+1], c=g[(iy+1)*cw+ix], d=g[(iy+1)*cw+ix+1];
+    return (a+(b-a)*s(tx))+((c+(d-c)*s(tx))-(a+(b-a)*s(tx)))*s(ty); };
+}
+
+function generateLevel(seed,level){
+  const R=rng(seed);
+  const n1=makeNoise(R,5), n2=makeNoise(R,3);
+  const base=new Float32Array(GW*GH);
+  for(let y=0;y<GH;y++) for(let x=0;x<GW;x++)
+    base[idx(x,y)]=(GH-y)*0.3 + (n1(x,y)-.5)*0.9 + (n2(x,y)-.5)*0.25;
+  // spring near the top
+  const sx=4+Math.floor(R()*(GW-8)), sy=1;
+  // natural path: steepest descent from the spring
+  const path=[]; let cx=sx, cy=sy, guard=0; const seen=new Set();
+  while(cy<GH-1 && guard++<200){ path.push([cx,cy]); seen.add(idx(cx,cy));
+    let best=null, bh=1e9;
+    for(const [dx,dy] of [[0,1],[1,0],[-1,0]]){ const nx=cx+dx, ny=cy+dy; if(!inb(nx,ny)||seen.has(idx(nx,ny))) continue;
+      const h=base[idx(nx,ny)]; if(h<bh){bh=h;best=[nx,ny];} }
+    if(!best) break; cx=best[0]; cy=best[1]; }
+  // carve the natural stream slightly so water clearly follows it
+  const stream=new Uint8Array(GW*GH);
+  for(const [x,y] of path){ base[idx(x,y)]-=0.6; stream[idx(x,y)]=1; }
+  // the spring sits in a small pond: higher banks all round, one outlet into the stream
+  { const si=idx(sx,sy), out=path[1]?idx(path[1][0],path[1][1]):-1;
+    for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){ const nx=sx+dx, ny=sy+dy; if(!inb(nx,ny)) continue; const j=idx(nx,ny);
+      if(j===out) base[j]=Math.min(base[j],base[si]-0.3); else base[j]=Math.max(base[j],base[si]+0.5); } }
+  // house sits on the natural path, so doing nothing floods it
+  const houses=[]; const hp=path[Math.min(path.length-1,8+Math.floor(R()*4))];
+  houses.push({x:hp[0],y:hp[1]});
+  if(level>=3){ const hp2=path[Math.min(path.length-1,16+Math.floor(R()*3))]; if(hp2) houses.push({x:hp2[0],y:hp2[1]}); }
+  // fields: 2x2 plots away from the natural path, lower than the spring
+  const nf=Math.min(4,1+level), fields=[];
+  for(let tries=0;tries<500&&fields.length<nf;tries++){
+    const fx=1+Math.floor(R()*(GW-3)), fy=9+Math.floor(R()*(GH-12));
+    const cells=[[fx,fy],[fx+1,fy],[fx,fy+1],[fx+1,fy+1]];
+    const farPath=path.every(([px,py])=>Math.abs(px-fx)+Math.abs(py-fy)>=4);
+    const farOthers=fields.every(f=>Math.abs(f.x-fx)+Math.abs(f.y-fy)>=5)&&houses.every(h=>Math.abs(h.x-fx)+Math.abs(h.y-fy)>=4);
+    if(!farPath||!farOthers) continue;
+    // flatten the plot into a shallow basin
+    let m=Math.min(...cells.map(([x,y])=>base[idx(x,y)]));
+    for(const [x,y] of cells) base[idx(x,y)]=m-DIG-0.05; // a field is a shallow basin, as deep as a channel
+    fields.push({x:fx,y:fy,cells,need:5,got:0});
+  }
+  const water=80+fields.length*32;
+  return {base,stream,spring:{x:sx,y:sy},houses,fields,water,path,budget:24+fields.length*12+level*2};
+}
+
+// ---- simulation ----
+function makeSim(L,dig,dam){
+  const h=new Float32Array(GW*GH), w=new Float32Array(GW*GH), d=new Float32Array(GW*GH);
+  const wet=new Uint8Array(GW*GH);
+  for(let i=0;i<h.length;i++){ h[i]=L.base[i]-(dig[i]?DIG:0)+(dam&&dam[i]?DAM:0); wet[i]=(dig[i]||L.stream[i])?1:0; }
+  const fieldOf=new Int16Array(GW*GH).fill(-1);
+  L.fields.forEach((f,k)=>{ f.got=0; for(const [x,y] of f.cells) fieldOf[idx(x,y)]=k; });
+  const houseCells=L.houses.map(hh=>idx(hh.x,hh.y));
+  return {h,w,d,wet,fieldOf,houseCells,left:L.water,steps:0,flooded:new Set(),drained:0,done:false};
+}
+function step(L,S){
+  const {h,w,d,fieldOf}=S;
+  // spring
+  const si=idx(L.spring.x,L.spring.y); const add=Math.min(0.18,S.left); w[si]+=add; S.left-=add;
+  d.fill(0); let moved=0;
+  for(let y=0;y<GH;y++) for(let x=0;x<GW;x++){ const i=idx(x,y); const wi=w[i]; if(wi<=1e-5) continue;
+    const si2=h[i]+wi; let outs=[], tot=0;
+    if(x>0){ const j=i-1, df=si2-(h[j]+w[j]); if(df>0){ outs.push([j,df]); tot+=df; } }
+    if(x<GW-1){ const j=i+1, df=si2-(h[j]+w[j]); if(df>0){ outs.push([j,df]); tot+=df; } }
+    if(y>0){ const j=i-GW, df=si2-(h[j]+w[j]); if(df>0){ outs.push([j,df]); tot+=df; } }
+    if(y<GH-1){ const j=i+GW, df=si2-(h[j]+w[j]); if(df>0){ outs.push([j,df]); tot+=df; } }
+    if(!tot) continue;
+    const move=Math.min(wi*0.95, tot*0.25); // never move more than you have
+    for(const [j,df] of outs){ const m=move*df/tot; d[j]+=m; } d[i]-=move; moved+=move;
+  }
+  for(let i=0;i<w.length;i++){ w[i]=Math.max(0,w[i]+d[i]); }
+  // bottom row drains into the river below the map
+  for(let x=0;x<GW;x++){ const i=idx(x,GH-1); const o=w[i]*0.5; w[i]-=o; S.drained+=o; }
+  // fields soak water up
+  L.fields.forEach((f,k)=>{ for(const [x,y] of f.cells){ const i=idx(x,y); if(f.got>=f.need) break;
+    const a=Math.min(w[i],0.08,f.need-f.got); w[i]-=a; f.got+=a; } });
+  // houses flood when water stands on them
+  S.houseCells.forEach((hi,k)=>{ if(w[hi]>0.12) S.flooded.add(k); });
+  // meadow soaks water up fast, channels and the stream barely at all
+  for(let i=0;i<w.length;i++){ if(fieldOf[i]>=0) continue; const k=S.wet[i]?0.0006:0.02; w[i]=Math.max(0,w[i]-k); }
+  S.steps++;
+  let total=0; for(let i=0;i<w.length;i++) total+=w[i];
+  S.calm = (S.left<=0 && moved<0.03) ? (S.calm||0)+1 : 0;
+  if((S.left<=0 && total<0.6) || S.calm>40 || S.steps>4000) S.done=true;
+  return S;
+}
+
+(() => {
+const C=20, W=GW*C, H=GH*C;
+const cv=document.getElementById("c"), ctx=cv.getContext("2d");
+const $=id=>document.getElementById(id);
+const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+let level=1, seed=(Math.random()*1e9)|0, L=null, dig=null, dam=null, tool="dig", phase="edit", S=null, showSlope=false;
+let hmin=0, hmax=1, flash=null;
+
+const isHouse=i=>L.houses.some(h=>idx(h.x,h.y)===i);
+const isField=i=>L.fields.some(f=>f.cells.some(([x,y])=>idx(x,y)===i));
+const isSpring=i=>idx(L.spring.x,L.spring.y)===i;
+function used(){ let u=0; for(let i=0;i<dig.length;i++) u+=dig[i]+dam[i]*2; return u; }
+
+function load(keepWork){
+  L=generateLevel(seed,level);
+  if(!keepWork){ dig=new Uint8Array(GW*GH); dam=new Uint8Array(GW*GH); }
+  L.fields.forEach(f=>f.got=0);
+  hmin=Infinity; hmax=-Infinity; for(const v of L.base){ hmin=Math.min(hmin,v); hmax=Math.max(hmax,v); }
+  S=null; phase="edit"; $("result").hidden=true; setButtons(); stats();
+  hint(level===1
+    ? "Strumień płynie prosto na dom. Postaw tamę tuż pod źródłem i wykop kanały do pól. Woda płynie tylko w dół, a jaśniejszy teren jest wyżej."
+    : "Mapa "+level+". Kanał dotykający strumienia przecieka do niego. Pokaż spadki, jeśli nie wiesz, którędy spłynie woda.");
+}
+function hint(t){ $("hint").textContent=t; }
+function stats(){
+  $("s-level").textContent=level;
+  $("s-shovel").textContent=used()+"/"+L.budget;
+  $("s-fields").textContent=L.fields.filter(f=>f.got>=f.need).length+"/"+L.fields.length;
+}
+function setButtons(){
+  const editing=phase==="edit";
+  ["t-dig","t-dam","t-fill","b-clear"].forEach(id=>$(id).disabled=!editing);
+  $("b-open").disabled=!editing;
+  $("b-open").textContent=phase==="run"?"Woda płynie…":"Otwórz śluzę";
+}
+function setTool(t){ tool=t; for(const k of ["dig","dam","fill"]) $("t-"+k).setAttribute("aria-pressed",k===t); }
+
+// ---------- editing ----------
+function apply(i){
+  if(isHouse(i)||isField(i)||isSpring(i)) return;
+  if(tool==="fill"){ if(dig[i]||dam[i]){ dig[i]=0; dam[i]=0; } return; }
+  if(tool==="dig"){ if(dig[i]||dam[i]) return;
+    if(used()+1>L.budget){ noShovel(); return; } dig[i]=1; }
+  if(tool==="dam"){ if(dam[i]) return; const extra=2-(dig[i]?1:0);
+    if(used()+extra>L.budget){ noShovel(); return; } dig[i]=0; dam[i]=1; }
+}
+function noShovel(){ hint("Skończyły się łopaty. Zasyp zbędne odcinki, żeby odzyskać łopaty."); flash={t:performance.now()}; }
+let drawing=false, lastCell=null;
+function cellAt(e){ const r=cv.getBoundingClientRect(); const x=(e.clientX-r.left-ox)/scale, y=(e.clientY-r.top-oy)/scale;
+  return [Math.floor(x/C),Math.floor(y/C)]; }
+function paintTo(cx,cy){
+  if(!lastCell){ if(inb(cx,cy)) apply(idx(cx,cy)); lastCell=[cx,cy]; return; }
+  let [x0,y0]=lastCell; const dx=cx-x0, dy=cy-y0, n=Math.max(Math.abs(dx),Math.abs(dy));
+  // walk cell by cell with 4-connected steps, so channels never connect only by a corner
+  let x=x0, y=y0;
+  for(let k=1;k<=n;k++){ const tx=Math.round(x0+dx*k/n), ty=Math.round(y0+dy*k/n);
+    if(tx!==x&&ty!==y){ x=tx; if(inb(x,y)) apply(idx(x,y)); }
+    x=tx; y=ty; if(inb(x,y)) apply(idx(x,y)); }
+  lastCell=[cx,cy];
+}
+cv.addEventListener("pointerdown",e=>{ if(phase!=="edit") return; try{cv.setPointerCapture(e.pointerId);}catch(_){}
+  drawing=true; lastCell=null; const [x,y]=cellAt(e); paintTo(x,y); stats(); });
+cv.addEventListener("pointermove",e=>{ if(!drawing) return; const [x,y]=cellAt(e); if(lastCell&&x===lastCell[0]&&y===lastCell[1]) return; paintTo(x,y); stats(); });
+cv.addEventListener("pointerup",()=>{ drawing=false; lastCell=null; });
+cv.addEventListener("pointercancel",()=>{ drawing=false; lastCell=null; });
+
+// ---------- running ----------
+function open(){
+  if(phase!=="edit") return;
+  S=makeSim(L,dig,dam); phase="run"; setButtons(); hint("Woda płynie. Patrz, którędy idzie.");
+}
+function finish(){
+  phase="done"; setButtons(); stats();
+  const full=L.fields.filter(f=>f.got>=f.need).length, all=full===L.fields.length, flooded=S.flooded.size>0;
+  const row=$("r-row"); row.innerHTML="";
+  const btn=(label,cls,fn)=>{ const b=document.createElement("button"); b.textContent=label; if(cls) b.className=cls; b.onclick=fn; row.appendChild(b); };
+  if(all&&!flooded){
+    const u=used(), st=u<=L.budget*0.5?3:u<=L.budget*0.75?2:1;
+    $("r-stars").textContent="★".repeat(st)+"☆".repeat(3-st);
+    $("r-title").textContent="Wszystkie pola nawodnione!";
+    $("r-text").textContent="Zużyte łopaty: "+u+" z "+L.budget+"."+(st<3?" Trzy gwiazdki za zmieszczenie się w połowie łopat.":"");
+    btn("Następna mapa","primary",()=>{ level++; seed=(Math.random()*1e9)|0; load(false); });
+    btn("Popraw ten układ","",()=>load(true));
+  } else {
+    $("r-stars").textContent="";
+    $("r-title").textContent=flooded?"Zalany dom!":"Pola nie dostały dość wody";
+    const parts=[]; if(flooded) parts.push("Woda doszła do domu. Zatrzymaj strumień tamą wyżej albo odprowadź wodę z dala od niego.");
+    if(!all) parts.push("Nawodnione pola: "+full+" z "+L.fields.length+". Sprawdź, gdzie woda stanęła albo się rozlała.");
+    $("r-text").textContent=parts.join(" ");
+    btn("Popraw kanały","primary",()=>load(true));
+    btn("Zobacz mapę","",()=>{ $("result").hidden=true; hint("Tak skończyła się woda. Naciśnij „Popraw kanały” na dole, żeby wrócić do kopania."); showFixButton(); });
+  }
+  setTimeout(()=>{ $("result").hidden=false; }, 600);
+}
+function showFixButton(){ const b=$("b-open"); b.disabled=false; b.textContent="Popraw kanały"; b.onclick=()=>{ b.onclick=open; load(true); }; }
+
+// ---------- drawing ----------
+let scale=1, ox=0, oy=0;
+function resize(){ const r=cv.getBoundingClientRect(), dpr=Math.min(devicePixelRatio||1,2);
+  cv.width=r.width*dpr; cv.height=r.height*dpr;
+  scale=Math.min(r.width/W,r.height/H); ox=(r.width-W*scale)/2; oy=(r.height-H*scale)/2;
+  ctx.setTransform(dpr*scale,0,0,dpr*scale,dpr*ox,dpr*oy); }
+
+const BAND=0.5;
+function heightAt(i){ return L.base[i]-(dig[i]?DIG:0)+(dam[i]?DAM:0); }
+function bandOf(i){ return Math.floor((L.base[i]-hmin)/BAND); }
+function grass(i){ // lighter = higher
+  const t=(L.base[i]-hmin)/(hmax-hmin||1), b=Math.floor(t*8)/8;
+  const l=34+b*26; return "hsl("+(96-b*14)+" 34% "+l+"%)"; }
+
+function draw(now){
+  // simulate a few steps per frame
+  if(phase==="run"){ for(let k=0;k<(reduce?14:8)&&!S.done;k++) step(L,S); stats(); if(S.done) finish(); }
+
+  ctx.clearRect(-ox/scale,-oy/scale,W+2*ox/scale,H+2*oy/scale);
+  ctx.save(); ctx.beginPath(); ctx.roundRect?ctx.roundRect(0,0,W,H,14):ctx.rect(0,0,W,H); ctx.clip();
+  // terrain bands
+  for(let y=0;y<GH;y++) for(let x=0;x<GW;x++){ const i=idx(x,y); ctx.fillStyle=grass(i); ctx.fillRect(x*C,y*C,C+0.5,C+0.5); }
+  // contour lines between height bands
+  ctx.strokeStyle="rgba(30,45,25,.28)"; ctx.lineWidth=1; ctx.beginPath();
+  for(let y=0;y<GH;y++) for(let x=0;x<GW;x++){ const i=idx(x,y), b=bandOf(i);
+    if(x<GW-1&&bandOf(i+1)!==b){ ctx.moveTo((x+1)*C,y*C); ctx.lineTo((x+1)*C,(y+1)*C); }
+    if(y<GH-1&&bandOf(i+GW)!==b){ ctx.moveTo(x*C,(y+1)*C); ctx.lineTo((x+1)*C,(y+1)*C); } }
+  ctx.stroke();
+  // river along the bottom edge
+  ctx.fillStyle="#3b86d1"; ctx.globalAlpha=.5; ctx.fillRect(0,H-6,W,6); ctx.globalAlpha=1;
+
+  // stream bed, channels, dams
+  for(let y=0;y<GH;y++) for(let x=0;x<GW;x++){ const i=idx(x,y), px=x*C, py=y*C;
+    if(L.stream[i]&&!dig[i]){ ctx.fillStyle="#c9c09a"; ctx.fillRect(px+3,py+3,C-6,C-6);
+      // bed links to stream neighbours
+      if(x<GW-1&&L.stream[i+1]) ctx.fillRect(px+C-3,py+3,6,C-6); if(y<GH-1&&L.stream[i+GW]) ctx.fillRect(px+3,py+C-3,C-6,6); }
+    if(dig[i]){ ctx.fillStyle="#7b5a37"; ctx.fillRect(px+2,py+2,C-4,C-4);
+      ctx.fillStyle="#6a4b2c";
+      if(x<GW-1&&dig[i+1]) ctx.fillRect(px+C-2,py+2,4,C-4); if(y<GH-1&&dig[i+GW]) ctx.fillRect(px+2,py+C-2,C-4,4); }
+  }
+  // water
+  if(S){ for(let y=0;y<GH;y++) for(let x=0;x<GW;x++){ const i=idx(x,y), w=S.w[i]; if(w<0.012) continue;
+    const a=Math.min(.9,.35+w*1.4); ctx.fillStyle="rgba(52,128,210,"+a+")"; ctx.fillRect(x*C+1,y*C+1,C-2,C-2);
+    if(!reduce&&w>0.05){ ctx.fillStyle="rgba(255,255,255,.18)"; const ph=(now/400+x*.7+y*.3)%1; ctx.fillRect(x*C+3,y*C+3+ph*(C-8),C-6,1.5); } } }
+  // dams on top of water
+  for(let i=0;i<dam.length;i++) if(dam[i]){ const x=i%GW, y=(i/GW)|0; drawStones(x*C,y*C); }
+  // fields
+  for(const f of L.fields){ const px=f.x*C, py=f.y*C, p=Math.min(1,f.got/f.need);
+    ctx.fillStyle=mix("#8f6a43","#5fae4d",p); ctx.fillRect(px+1,py+1,2*C-2,2*C-2);
+    ctx.strokeStyle=mix("#6b4d2e","#3f8a34",p); ctx.lineWidth=2;
+    for(let r=0;r<4;r++){ ctx.beginPath(); ctx.moveTo(px+5,py+6+r*9); ctx.lineTo(px+2*C-5,py+6+r*9); ctx.stroke(); }
+    if(p>=1){ ctx.strokeStyle="#f2c14e"; ctx.lineWidth=2.5; ctx.strokeRect(px+1,py+1,2*C-2,2*C-2); } }
+  // houses
+  L.houses.forEach((h,k)=>{ const px=h.x*C, py=h.y*C, fl=S&&S.flooded.has(k);
+    ctx.fillStyle="#f3eadb"; ctx.fillRect(px+3,py+8,C-6,C-10);
+    ctx.fillStyle="#c4553c"; ctx.beginPath(); ctx.moveTo(px+1,py+9); ctx.lineTo(px+C/2,py+1); ctx.lineTo(px+C-1,py+9); ctx.closePath(); ctx.fill();
+    ctx.fillStyle="#6b4b35"; ctx.fillRect(px+C/2-2,py+12,4,6);
+    if(fl){ ctx.strokeStyle="#e0412f"; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(px+C/2,py+C/2,C*0.75+(reduce?0:Math.sin(now/120)*2),0,7); ctx.stroke(); } });
+  // spring
+  { const px=L.spring.x*C+C/2, py=L.spring.y*C+C/2; ctx.fillStyle="#3b86d1"; ctx.beginPath(); ctx.arc(px,py,7,0,7); ctx.fill();
+    if(!reduce&&(phase!=="done")){ const k=(now/900)%1; ctx.strokeStyle="rgba(59,134,209,"+(1-k)+")"; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(px,py,7+k*9,0,7); ctx.stroke(); }
+    if(S&&phase==="run"){ ctx.fillStyle="rgba(255,255,255,.9)"; ctx.font="700 9px Nunito,sans-serif"; ctx.textAlign="center"; ctx.fillText(Math.round(S.left/L.water*100)+"%",px,py-12); } }
+  // slope arrows: where water would go from each cell right now
+  if(showSlope&&phase==="edit"){ ctx.strokeStyle="rgba(255,255,255,.75)"; ctx.lineWidth=1.3;
+    for(let y=0;y<GH;y++) for(let x=0;x<GW;x++){ const i=idx(x,y), hi=heightAt(i); let best=null, bh=hi-0.02;
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){ const nx=x+dx, ny=y+dy; if(!inb(nx,ny)) continue; const hj=heightAt(idx(nx,ny)); if(hj<bh){bh=hj;best=[dx,dy];} }
+      if(!best) { ctx.fillStyle="rgba(255,255,255,.6)"; ctx.fillRect(x*C+C/2-1.5,y*C+C/2-1.5,3,3); continue; }
+      const cx=x*C+C/2, cy=y*C+C/2, ex=cx+best[0]*6, ey=cy+best[1]*6;
+      ctx.beginPath(); ctx.moveTo(cx-best[0]*5,cy-best[1]*5); ctx.lineTo(ex,ey);
+      ctx.moveTo(ex,ey); ctx.lineTo(ex-best[0]*3-best[1]*3,ey-best[1]*3-best[0]*3);
+      ctx.moveTo(ex,ey); ctx.lineTo(ex-best[0]*3+best[1]*3,ey-best[1]*3+best[0]*3); ctx.stroke(); } }
+  ctx.restore();
+  // shovel warning flash
+  if(flash&&now-flash.t<500){ ctx.strokeStyle="rgba(207,75,60,"+(1-(now-flash.t)/500)+")"; ctx.lineWidth=4; ctx.strokeRect(2,2,W-4,H-4); }
+  requestAnimationFrame(draw);
+}
+function drawStones(px,py){ ctx.fillStyle="#9a9a92"; for(const [a,b,r] of [[6,7,4.5],[13,6,4],[9,13,4.5],[15,14,3.5],[4,14,3]]){ ctx.beginPath(); ctx.arc(px+a,py+b,r,0,7); ctx.fill(); }
+  ctx.fillStyle="#b9b9b1"; ctx.beginPath(); ctx.arc(px+6,py+6,1.8,0,7); ctx.arc(px+9,py+12,1.8,0,7); ctx.fill(); }
+function mix(a,b,t){ const pa=[1,3,5].map(k=>parseInt(a.substr(k,2),16)), pb=[1,3,5].map(k=>parseInt(b.substr(k,2),16));
+  return "rgb("+pa.map((v,k)=>Math.round(v+(pb[k]-v)*t)).join(",")+")"; }
+
+// ---------- controls ----------
+$("t-dig").onclick=()=>setTool("dig"); $("t-dam").onclick=()=>setTool("dam"); $("t-fill").onclick=()=>setTool("fill");
+$("b-open").onclick=open;
+$("b-slope").onclick=e=>{ showSlope=!showSlope; e.currentTarget.setAttribute("aria-pressed",showSlope); };
+$("b-clear").onclick=()=>{ dig.fill(0); dam.fill(0); stats(); };
+$("b-new").onclick=()=>{ seed=(Math.random()*1e9)|0; load(false); setTool("dig"); };
+addEventListener("resize",resize);
+resize(); load(false); requestAnimationFrame(draw);
+})();
+</script>
+
+</body>
+</html>
