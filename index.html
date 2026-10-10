@@ -39,26 +39,22 @@ h1{font-family:var(--display);font-weight:400;font-size:1.7rem;line-height:1;mar
 canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:pointer}
 .bar{display:flex;gap:8px;padding:8px 16px 14px;flex-wrap:wrap}
 button{font:inherit;font-weight:800;border:0;border-radius:999px;padding:10px 16px;cursor:pointer;
-  background:var(--card);color:var(--ink);box-shadow:0 1px 0 rgba(0,0,0,.08);touch-action:none}
+  background:var(--card);color:var(--ink);box-shadow:0 1px 0 rgba(0,0,0,.08)}
 button.primary{background:var(--accent);color:#fff}
 button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 button[aria-pressed="true"]{outline:2px solid var(--accent)}
-#motion-state{font-size:.75rem;font-weight:800;padding:2px 8px;border-radius:999px;background:var(--card);color:var(--muted);margin-left:6px}
-#motion-state.on{background:var(--accent);color:#fff}
-#b-shake{font-variant-numeric:tabular-nums;min-width:9.5em}
 #result{position:absolute;left:16px;right:16px;top:50%;transform:translateY(-50%);max-width:360px;margin:auto;
   background:var(--card);border-radius:20px;padding:22px;text-align:center;box-shadow:0 18px 40px rgba(0,0,0,.25)}
 #result h2{font-family:var(--display);font-weight:400;font-size:1.8rem;margin:0 0 6px;color:var(--accent);text-wrap:balance}
 #result p{margin:0 0 16px;color:var(--muted)}
 #result .row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 </style>
-
 </head>
 <body>
 <header>
   <div>
     <h1>Ostatni Liść</h1>
-    <div class="sub"><span id="mode-label">Drzewo dnia</span><span id="motion-state">ruch wyłączony</span></div>
+    <div class="sub" id="mode-label">Drzewo dnia</div>
   </div>
   <div class="stats">
     <div class="stat"><b id="s-left">0</b><span>liści</span></div>
@@ -66,7 +62,7 @@ button[aria-pressed="true"]{outline:2px solid var(--accent)}
     <div class="stat"><b id="s-best">–</b><span>rekord</span></div>
   </div>
 </header>
-<div class="hint" id="hint">Stuknij liść, by go zerwać. Przytrzymaj, by zobaczyć skutki, i odsuń palec, by anulować. Zostaw dokładnie jeden.</div>
+<div class="hint" id="hint"></div>
 <div class="legend" aria-label="Siła chwytu liści">
   <span>słaby</span>
   <i style="background:#d8c27e"></i><i style="background:#e9a63a"></i><i style="background:#e0712c"></i><i style="background:#c4412a"></i><i style="background:#8e2a1c"></i>
@@ -84,8 +80,6 @@ button[aria-pressed="true"]{outline:2px solid var(--accent)}
   </div>
 </div>
 <div class="bar">
-  <button class="primary" id="b-motion">Włącz ruch</button>
-  <button id="b-shake">Przytrzymaj: wstrząs</button>
   <button id="b-nums" aria-pressed="false">Liczby</button>
   <button id="b-daily" aria-pressed="true">Drzewo dnia</button>
   <button id="b-random" aria-pressed="false">Losowe</button>
@@ -95,8 +89,10 @@ button[aria-pressed="true"]{outline:2px solid var(--accent)}
 <script>
 (() => {
 const W=400, H=600, GROUND=575;
-const NEAR=34, FAR=68;               // tap damage rings: 2 inside NEAR, 1 inside FAR
+const NEAR=34, FAR=68;                 // tap damage rings: 2 inside NEAR, 1 inside FAR
+const PULL=[28,62,100], PULL_MAX=125;  // slingshot pull length needed for strength 1, 2, 3
 const GRIP_COL=["","#d8c27e","#e9a63a","#e0712c","#c4412a","#8e2a1c"];
+const HINT="Stuknij liść, by go zerwać. Złap gałąź i odciągnij jak procę, by nią potrząsnąć. Zostaw dokładnie jeden liść.";
 const cv=document.getElementById("c"), ctx=cv.getContext("2d");
 const $=id=>document.getElementById(id);
 const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -106,42 +102,44 @@ function rng(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Ma
 function todayKey(){ const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function hash(s){ let h=2166136261; for(const c of s){ h^=c.charCodeAt(0); h=Math.imul(h,16777619);} return h>>>0; }
 function store(k,v){ try{ if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k,v);}catch(e){ return null; } }
+function plural(n){ return n===1?"liść": (n%10>=2&&n%10<=4&&(n%100<12||n%100>14))?"liście":"liści"; }
 
 let mode="daily", seed=hash(todayKey()), branches=[], leaves=[], fallen=[], pile=[], moves=0, over=false;
-let lean=0, leanTarget=0, showNums=false, jolt=0, holding=null, charging=null, lastMove=null;
+let showNums=false, jolt=0, holding=null, pull=null, spring=null, lastMove=null;
 
-function bestKey(){ return mode==="daily" ? "ol-grip-best-"+todayKey() : null; }
-
+function bestKey(){ return mode==="daily" ? "ol-pull-best-"+todayKey() : null; }
 function pickGrip(r){ return r<.25?1 : r<.5?2 : r<.72?3 : r<.88?4 : 5; }
 
 function build(){
   const R=rng(seed);
-  branches=[]; leaves=[]; fallen=[]; pile=[]; moves=0; over=false; lastMove=null;
-  let bid=0;
-  function grow(x,y,ang,len,w,depth){
-    const x2=x+Math.cos(ang)*len, y2=y+Math.sin(ang)*len, id=bid++;
-    branches.push({x,y,x2,y2,w});
+  branches=[]; leaves=[]; fallen=[]; pile=[]; moves=0; over=false; lastMove=null; pull=null; spring=null; holding=null;
+  function grow(x,y,ang,len,w,depth,parent){
+    const x2=x+Math.cos(ang)*len, y2=y+Math.sin(ang)*len, id=branches.length;
+    branches.push({x,y,x2,y2,w,id,parent,kids:[]});
+    if(parent>=0) branches[parent].kids.push(id);
     if(depth>=2){
       const n=depth>=4?3:2;
       for(let i=0;i<n;i++){
         const t=0.45+R()*0.55, side=R()<.5?-1:1;
         leaves.push({ax:x+(x2-x)*t, ay:y+(y2-y)*t, ang:ang+side*(0.6+R()*0.9), size:11+R()*6,
-          grip:pickGrip(R()), ph:R()*6.28, wob:0, on:true, flash:0});
+          grip:pickGrip(R()), ph:R()*6.28, wob:0, on:true, branch:id});
       }
     }
     if(depth<5){
       const kids=depth<2?3:2;
       for(let k=0;k<kids;k++){
         const spread=(k-(kids-1)/2)*(0.55+R()*0.25)+(R()-.5)*0.3;
-        grow(x2,y2,ang+spread,len*(0.68+R()*0.12),w*0.66,depth+1);
+        grow(x2,y2,ang+spread,len*(0.68+R()*0.12),w*0.66,depth+1,id);
       }
     }
   }
-  grow(W/2,GROUND,-Math.PI/2+(R()-.5)*0.08,120,18,0);
+  grow(W/2,GROUND,-Math.PI/2+(R()-.5)*0.08,120,18,0,-1);
   leaves=leaves.filter((l,i)=>!leaves.slice(0,i).some(o=>Math.hypot(o.ax-l.ax,o.ay-l.ay)<9));
   while(leaves.length>40) leaves.splice(Math.floor(R()*leaves.length),1);
   for(const l of leaves){ l.cx=l.ax+Math.cos(l.ang)*l.size*0.8; l.cy=l.ay+Math.sin(l.ang)*l.size*0.8; }
-  $("result").hidden=true;
+  // every branch knows its whole subtree, so pulling it shakes exactly the leaves that hang from it
+  for(let i=branches.length-1;i>=0;i--){ const b=branches[i]; b.sub=new Set([i]); for(const k of b.kids) for(const s of branches[k].sub) b.sub.add(s); }
+  $("result").hidden=true; $("hint").textContent=HINT;
   updateStats();
 }
 
@@ -151,11 +149,8 @@ function updateStats(){
   const k=bestKey(), b=k?store(k):null; $("s-best").textContent=b?b:"–";
 }
 
-// One rule set, used for both the preview and the real move, so the preview is always exact.
+// One rule set for both preview and the real move, so the preview is always exact.
 function tapDamage(d){ return d<NEAR?2 : d<FAR?1 : 0; }
-// Shake zones: -1 left side, 0 middle, 1 right side, undefined = whole tree (button fallback).
-const ZONES={"-1":[0,W/2-30],"0":[W/2-55,W/2+55],"1":[W/2+30,W]};
-function inZone(l,z){ if(z==null) return true; const [a,b]=ZONES[z]; return l.ax>=a&&l.ax<=b; }
 function effects(action){
   const fall=new Set(), dmg=new Map();
   if(action.type==="tap"){
@@ -163,8 +158,9 @@ function effects(action){
     for(const l of alive()){ if(l===action.leaf) continue;
       const v=tapDamage(Math.hypot(l.ax-action.leaf.ax,l.ay-action.leaf.ay));
       if(v){ dmg.set(l,v); if(l.grip<=v) fall.add(l); } }
-  } else {
-    for(const l of alive()){ if(!inZone(l,action.zone)) continue; dmg.set(l,action.s); if(l.grip<=action.s) fall.add(l); }
+  } else if(action.s>0){
+    const sub=branches[action.branch].sub;
+    for(const l of alive()){ if(!sub.has(l.branch)) continue; dmg.set(l,action.s); if(l.grip<=action.s) fall.add(l); }
   }
   return {fall,dmg};
 }
@@ -172,13 +168,13 @@ function effects(action){
 function apply(action){
   if(over) return;
   const {fall,dmg}=effects(action);
-  moves++; jolt=action.type==="shake"?0.4+action.s*0.25:0.5;
-  const ox=action.type==="tap"?action.leaf.ax:W/2, oy=action.type==="tap"?action.leaf.ay:GROUND-200;
-  for(const [l,v] of dmg){ l.grip-=v; l.wob=1; l.flash=1; }
-  for(const l of fall){ l.on=false;
-    const d=Math.hypot(l.ax-ox,l.ay-oy), delay=action.type==="tap"&&l===action.leaf?0:60+d*3;
+  moves++; jolt=action.type==="tap"?0.5:0.3+action.s*0.2;
+  const ox=action.type==="tap"?action.leaf.ax:branches[action.branch].x2, oy=action.type==="tap"?action.leaf.ay:branches[action.branch].y2;
+  for(const [l,v] of dmg){ l.grip-=v; l.wob=1; }
+  for(const l of fall){ const col=GRIP_COL[Math.max(1,l.grip+(dmg.get(l)||0))]; l.on=false;
+    const d=Math.hypot(l.ax-ox,l.ay-oy), delay=action.type==="tap"&&l===action.leaf?0:80+d*2.5;
     setTimeout(()=>fallen.push({x:l.ax,y:l.ay,vx:(l.ax-ox)*0.004,vy:0,rot:l.ang,vr:(l.ax>ox?1:-1)*0.04,
-      size:l.size,col:GRIP_COL[Math.max(1,l.grip+(dmg.get(l)||0))],ph:l.ph}),delay); }
+      size:l.size,col,ph:l.ph}),delay); }
   lastMove={type:action.type,s:action.s,count:fall.size};
   updateStats();
   const n=alive().length;
@@ -193,50 +189,58 @@ function finish(n){
     if(k){ const b=+store(k)||0; if(!b||moves<b){ store(k,String(moves)); rec=" Nowy rekord dnia."; } }
     $("r-text").textContent="Ostatni liść trzyma się gałęzi. Ruchy: "+moves+"."+rec;
   } else {
-    const what=lastMove.type==="tap"?"Ostatnie stuknięcie":"Ostatni wstrząs (siła "+lastMove.s+")";
-    $("r-text").textContent=what+" strąciło naraz "+lastMove.count+" "+(lastMove.count%10>=2&&lastMove.count%10<=4&&(lastMove.count%100<12||lastMove.count%100>14)?"liście":"liści")+". Przytrzymaj liść przed ruchem, żeby to zobaczyć.";
+    const what=lastMove.type==="tap"?"Ostatnie stuknięcie":"Ostatnie naciągnięcie (siła "+lastMove.s+")";
+    $("r-text").textContent=what+" strąciło naraz "+lastMove.count+" "+plural(lastMove.count)+". Obrysowane liście w podglądzie to te, które spadną.";
   }
   $("r-share").dataset.text=(win?"🍂 Ostatni liść: 1 liść w "+moves+" ruchach":"🍂 Ostatni liść: drzewo wygrało ze mną")+(mode==="daily"?" (drzewo dnia "+todayKey()+")":"");
   $("result").hidden=false; updateStats();
 }
 
-// ---------- input: canvas ----------
-function toLogical(e){ const r=cv.getBoundingClientRect(); const x=(e.clientX-r.left-ox)/scale, y=(e.clientY-r.top-oy)/scale;
-  const c=Math.cos(-lean), s=Math.sin(-lean), dx=x-W/2, dy=y-GROUND; return [W/2+dx*c-dy*s, GROUND+dx*s+dy*c]; }
-function hitLeaf(px,py){ let best=null,bd=26;
+// ---------- input ----------
+function toLogical(e){ const r=cv.getBoundingClientRect(); return [(e.clientX-r.left-ox)/scale,(e.clientY-r.top-oy)/scale]; }
+function hitLeaf(px,py){ let best=null,bd=24;
   for(const l of alive()){ const d=Math.hypot(l.cx-px,l.cy-py); if(d<bd){bd=d;best=l;} } return best; }
-cv.addEventListener("pointerdown",e=>{
-  if(over) return; const [x,y]=toLogical(e), l=hitLeaf(x,y); if(!l) return;
-  holding={leaf:l,x,y,t:performance.now(),cancel:false}; try{cv.setPointerCapture(e.pointerId);}catch(_){}
-});
-cv.addEventListener("pointermove",e=>{ if(!holding) return; const [x,y]=toLogical(e);
-  const moved=Math.hypot(x-holding.x,y-holding.y)>30;
-  if(moved!==holding.cancel){ holding.cancel=moved; setHint(); } });
-cv.addEventListener("pointerup",()=>{ if(holding&&!holding.cancel) apply({type:"tap",leaf:holding.leaf}); holding=null; setHint(); });
-cv.addEventListener("pointercancel",()=>{ holding=null; setHint(); });
+function hitBranch(px,py){ let best=null,bd=1e9,pt=null;
+  for(const b of branches){ const vx=b.x2-b.x, vy=b.y2-b.y, L=vx*vx+vy*vy;
+    const t=Math.max(0,Math.min(1,((px-b.x)*vx+(py-b.y)*vy)/L)), qx=b.x+vx*t, qy=b.y+vy*t;
+    const d=Math.hypot(px-qx,py-qy)-b.w/2; if(d<bd){bd=d;best=b;pt=[qx,qy];} }
+  return bd<16?{b:best,ax:pt[0],ay:pt[1]}:null; }
+function pullVec(){ let dx=pull.x-pull.ax, dy=pull.y-pull.ay; const d=Math.hypot(dx,dy);
+  if(d>PULL_MAX){ dx*=PULL_MAX/d; dy*=PULL_MAX/d; } return [dx,dy,Math.min(d,PULL_MAX)]; }
+function pullLevel(){ const d=pullVec()[2]; return d>=PULL[2]?3 : d>=PULL[1]?2 : d>=PULL[0]?1 : 0; }
 
-// ---------- input: shake button (hold to charge 1→2→3) ----------
-const sb=$("b-shake");
-function chargeLevel(){ return charging?Math.min(3,1+Math.floor((performance.now()-charging.t)/650)):1; }
-sb.addEventListener("pointerdown",e=>{ if(over) return; e.preventDefault(); charging={t:performance.now(),cancel:false}; try{sb.setPointerCapture(e.pointerId);}catch(_){} });
-sb.addEventListener("pointermove",e=>{ if(!charging) return; const r=sb.getBoundingClientRect();
-  charging.cancel = e.clientX<r.left-30||e.clientX>r.right+30||e.clientY<r.top-40||e.clientY>r.bottom+30; });
-sb.addEventListener("pointerup",()=>{ if(charging&&!charging.cancel) apply({type:"shake",s:chargeLevel()}); charging=null; sb.textContent="Przytrzymaj: wstrząs"; });
-sb.addEventListener("pointercancel",()=>{ charging=null; sb.textContent="Przytrzymaj: wstrząs"; });
-sb.addEventListener("click",e=>{ if(e.detail===0) apply({type:"shake",s:1}); }); // keyboard
+cv.addEventListener("pointerdown",e=>{
+  if(over) return; const [x,y]=toLogical(e);
+  try{cv.setPointerCapture(e.pointerId);}catch(_){}
+  const l=hitLeaf(x,y);
+  if(l){ holding={leaf:l,x,y,t:performance.now(),cancel:false}; return; }
+  const h=hitBranch(x,y);
+  if(h){ pull={branch:h.b.id,ax:h.ax,ay:h.ay,x,y}; spring=null; setHint(); }
+});
+cv.addEventListener("pointermove",e=>{ const [x,y]=toLogical(e);
+  if(pull){ pull.x=x; pull.y=y; setHint(); return; }
+  if(!holding) return; const moved=Math.hypot(x-holding.x,y-holding.y)>30;
+  if(moved!==holding.cancel){ holding.cancel=moved; setHint(); } });
+cv.addEventListener("pointerup",()=>{
+  if(pull){ const s=pullLevel(), [dx,dy]=pullVec();
+    if(s>0) apply({type:"pull",branch:pull.branch,s});
+    spring={branch:pull.branch,ax:pull.ax,ay:pull.ay,dx,dy,t:performance.now()}; pull=null; setHint(); return; }
+  if(holding&&!holding.cancel) apply({type:"tap",leaf:holding.leaf}); holding=null; setHint(); });
+cv.addEventListener("pointercancel",()=>{ holding=null; pull=null; setHint(); });
 
 function setHint(){
   const h=$("hint");
-  if(holding&&holding.cancel) h.textContent="Puść teraz, a ruch zostanie anulowany.";
-  else if(holding) h.textContent="Puść, żeby zerwać. Zaznaczone liście spadną, przerywane stracą chwyt.";
-  else if(charging) h.textContent="Im dłużej trzymasz, tym mocniejszy wstrząs. Zaznaczone liście spadną.";
-  else h.textContent="Stuknij liść, by go zerwać. Przytrzymaj, by zobaczyć skutki, i odsuń palec, by anulować. Zostaw dokładnie jeden.";
+  if(pull){ const s=pullLevel();
+    h.textContent = s ? "Siła "+s+" z 3. Puść, żeby potrząsnąć. Obrysowane liście spadną." : "Odciągnij dalej, żeby naciągnąć gałąź. Puść tutaj, żeby anulować."; }
+  else if(holding&&holding.cancel) h.textContent="Puść teraz, a ruch zostanie anulowany.";
+  else if(holding) h.textContent="Puść, żeby zerwać. Pełny obrys spadnie, przerywany straci chwyt. Odsuń palec, żeby anulować.";
+  else h.textContent=HINT;
 }
 
 // ---------- drawing ----------
 let theme={}, frame=0;
 function readTheme(){ const s=getComputedStyle(document.documentElement);
-  for(const k of ["sky","sky2","bark","ground","mark","accent"]) theme[k]=s.getPropertyValue("--"+k).trim(); }
+  for(const k of ["sky","sky2","bark","ground","mark","accent","card"]) theme[k]=s.getPropertyValue("--"+k).trim(); }
 let scale=1, ox=0, oy=0, dpr=1;
 function resize(){
   const r=cv.getBoundingClientRect(); dpr=Math.min(devicePixelRatio||1,2);
@@ -248,7 +252,7 @@ function leafShape(size){ ctx.beginPath(); ctx.moveTo(0,0);
   ctx.quadraticCurveTo(size*0.5,-size*0.55,size*1.6,0); ctx.quadraticCurveTo(size*0.5,size*0.55,0,0); ctx.closePath(); }
 function drawLeaf(x,y,rot,size,col,grip,mark){
   ctx.save(); ctx.translate(x,y); ctx.rotate(rot);
-  if(grip===1){ ctx.translate(2,0); } // cracked stem: leaf hangs off its point
+  if(grip===1) ctx.translate(2,0); // cracked stem: the leaf hangs off its point
   leafShape(size); ctx.fillStyle=col; ctx.fill();
   ctx.strokeStyle="rgba(50,20,8,.35)"; ctx.lineWidth=0.8; ctx.beginPath(); ctx.moveTo(1,0); ctx.lineTo(size*1.3,0); ctx.stroke();
   if(grip===1){ ctx.strokeStyle="rgba(50,20,8,.6)"; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(-2,-2); ctx.lineTo(0,2); ctx.stroke(); }
@@ -256,40 +260,52 @@ function drawLeaf(x,y,rot,size,col,grip,mark){
     ctx.setLineDash(mark==="fall"?[]:[3,2]); ctx.stroke(); ctx.setLineDash([]); }
   ctx.restore();
 }
+
+// Bending: points in the pulled subtree move toward the finger, more the further they are from the subtree's base.
+function bender(t){
+  let src=null, vx=0, vy=0;
+  if(pull){ const [dx,dy]=pullVec(); src=pull; vx=dx; vy=dy; }
+  else if(spring && !reduce){ const age=(t-spring.t)/1000, k=Math.exp(-age*3.2)*Math.cos(age*18);
+    if(Math.abs(k)<0.01&&age>0.4){ spring=null; } else { src=spring; vx=spring.dx*k; vy=spring.dy*k; } }
+  if(!src) return null;
+  const b=branches[src.branch], reach=Math.max(20,Math.hypot(src.ax-b.x,src.ay-b.y));
+  return {sub:b.sub, f:(x,y)=>{ const f=Math.min(1.5,Math.hypot(x-b.x,y-b.y)/reach)*0.45; return [x+vx*f,y+vy*f]; }};
+}
+
 function draw(t){
   if(frame++%30===0) readTheme();
   const g=ctx.createLinearGradient(0,-oy/scale,0,H); g.addColorStop(0,theme.sky2); g.addColorStop(1,theme.sky);
   ctx.fillStyle=g; ctx.fillRect(-ox/scale-2,-oy/scale-2,W+2*ox/scale+4,H+oy/scale+4);
   ctx.fillStyle=theme.ground; ctx.beginPath(); ctx.ellipse(W/2,GROUND+30,W*0.75,42,0,0,Math.PI*2); ctx.fill();
 
-  // preview
   let prev=null, centre=null;
   if(holding && !holding.cancel && performance.now()-holding.t>200){ prev=effects({type:"tap",leaf:holding.leaf}); centre=holding.leaf; }
-  if(charging){ const s=chargeLevel(); prev=effects({type:"shake",s});
-    sb.textContent=charging.cancel?"Puść, aby anulować":"Wstrząs: siła "+s+" "+"●".repeat(s)+"○".repeat(3-s); }
-  // with motion on, always show what the next shake will drop in the aimed zone
-  if(!prev && motionOn && !over){ prev=effects({type:"shake",s:1,zone:aimZone}); prev.dmg=new Map(); }
+  if(pull) prev=effects({type:"pull",branch:pull.branch,s:pullLevel()});
+  const bend=bender(t);
+  const P=(x,y,bid)=> bend&&bend.sub.has(bid) ? bend.f(x,y) : [x,y];
 
   const sx=jolt>0&&!reduce?Math.sin(t/22)*jolt*0.03:0; jolt=Math.max(0,jolt-0.03);
-  ctx.save(); ctx.translate(W/2,GROUND); lean+=(leanTarget-lean)*0.08; ctx.rotate(sx+lean); ctx.translate(-W/2,-GROUND);
+  ctx.save(); ctx.translate(W/2,GROUND); ctx.rotate(sx); ctx.translate(-W/2,-GROUND);
   ctx.strokeStyle=theme.bark; ctx.lineCap="round";
-  if(motionOn&&!over){ const [a,b]=ZONES[aimZone]; ctx.fillStyle=theme.mark; ctx.globalAlpha=armed?0.07:0.03;
-    ctx.beginPath(); ctx.roundRect?ctx.roundRect(a,40,b-a,GROUND-170,18):ctx.rect(a,40,b-a,GROUND-170); ctx.fill(); ctx.globalAlpha=1; }
-  for(const b of branches){ ctx.lineWidth=b.w; ctx.beginPath(); ctx.moveTo(b.x,b.y); ctx.lineTo(b.x2,b.y2); ctx.stroke(); }
+  for(const b of branches){ const [x1,y1]=P(b.x,b.y,b.id), [x2,y2]=P(b.x2,b.y2,b.id);
+    ctx.lineWidth=b.w; ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); }
   if(centre){ ctx.strokeStyle=theme.mark; ctx.globalAlpha=0.25; ctx.lineWidth=1;
     for(const r of [NEAR,FAR]){ ctx.beginPath(); ctx.arc(centre.ax,centre.ay,r,0,Math.PI*2); ctx.stroke(); }
     ctx.globalAlpha=1; }
   const wind=reduce?0:1;
   for(const l of leaves){ if(!l.on) continue;
-    const weak=(5-l.grip)/4; // 0 strong .. 1 weakest
+    const weak=(5-l.grip)/4;
     const idle=Math.sin(t/(420-weak*260)+l.ph)*(0.02+weak*0.2)*wind;
     const w=Math.sin(t/40+l.ph)*l.wob*0.5*wind; l.wob*=0.94;
     let mark=null; if(prev){ if(prev.fall.has(l)) mark="fall"; else if(prev.dmg.has(l)) mark="dmg"; }
-    drawLeaf(l.ax,l.ay,l.ang+idle+w,l.size,GRIP_COL[l.grip],l.grip,mark);
-    if(showNums){ ctx.fillStyle=theme.mark; ctx.font="800 10px Nunito, sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
-      ctx.fillText(l.grip,l.cx,l.cy); }
+    const [x,y]=P(l.ax,l.ay,l.branch);
+    drawLeaf(x,y,l.ang+idle+w,l.size,GRIP_COL[l.grip],l.grip,mark);
+    if(showNums){ const [cx,cy]=P(l.cx,l.cy,l.branch); ctx.fillStyle=theme.mark; ctx.font="800 10px Nunito, sans-serif";
+      ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText(l.grip,cx,cy); }
   }
   ctx.restore();
+
+  if(pull) drawSling();
 
   for(const p of pile) drawLeaf(p.x,p.y,p.rot,p.size,p.col,2,null);
   for(let i=fallen.length-1;i>=0;i--){ const f=fallen[i];
@@ -301,47 +317,25 @@ function draw(t){
   requestAnimationFrame(draw);
 }
 
-
-// ---------- motion: tilt aims at a side of the tree, one shake = 1 point off every leaf in that zone ----------
-// A shake fires once, then the phone has to calm down before the next one counts, so one hard shake is never counted twice.
-let motionOn=false, armed=true, aimZone=0, lastAcc=null, peak=0, peakT=0, calmSince=0, shotZone=0, gotEvent=false;
-addEventListener("devicemotion",()=>{gotEvent=true;},{once:true});
-function onMotion(e){
-  let mag; const a=e.acceleration;
-  if(a&&a.x!=null) mag=Math.hypot(a.x,a.y,a.z);
-  else { const g=e.accelerationIncludingGravity; if(!g||g.x==null) return;
-    if(lastAcc) mag=Math.hypot(g.x-lastAcc.x,g.y-lastAcc.y,g.z-lastAcc.z); lastAcc={x:g.x,y:g.y,z:g.z}; if(mag==null) return; }
-  const now=performance.now();
-  if(armed){
-    if(mag>13){ if(!peak) shotZone=aimZone; peak=Math.max(peak,mag); peakT=now; }
-    if(peak&&now-peakT>120){
-      armed=false; peak=0; calmSince=0;
-      if(!over){ apply({type:"shake",s:1,zone:shotZone}); try{ navigator.vibrate&&navigator.vibrate(40); }catch(_){} }
-    }
-  } else {
-    if(mag<4){ if(!calmSince) calmSince=now; else if(now-calmSince>350) armed=true; } else calmSince=0;
+// Slingshot band from the grab point to the finger, plus a 3-step power meter next to the finger.
+function drawSling(){
+  const [dx,dy,d]=pullVec(), s=pullLevel(), fx=pull.ax+dx, fy=pull.ay+dy;
+  ctx.strokeStyle=theme.accent; ctx.lineWidth=3; ctx.setLineDash(s?[]:[5,4]);
+  ctx.beginPath(); ctx.moveTo(pull.ax,pull.ay); ctx.lineTo(fx,fy); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle=theme.accent; ctx.beginPath(); ctx.arc(pull.ax,pull.ay,4,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(fx,fy,7,0,Math.PI*2); ctx.fill();
+  const mx=Math.max(8,Math.min(W-78,fx+16)), my=Math.max(10,fy-40);
+  ctx.fillStyle=theme.card; ctx.globalAlpha=0.92; ctx.beginPath();
+  if(ctx.roundRect) ctx.roundRect(mx-6,my-6,82,32,10); else ctx.rect(mx-6,my-6,82,32);
+  ctx.fill(); ctx.globalAlpha=1;
+  for(let i=0;i<3;i++){
+    const lo=i?PULL[i-1]:0, fill=Math.min(1,Math.max(0,(d-lo)/(PULL[i]-lo)));
+    ctx.fillStyle=theme.mark; ctx.globalAlpha=0.15; ctx.fillRect(mx+i*24,my,20,8); ctx.globalAlpha=1;
+    ctx.fillStyle=theme.accent; ctx.fillRect(mx+i*24,my,20*fill,8);
   }
+  ctx.fillStyle=theme.mark; ctx.font="800 11px Nunito, sans-serif"; ctx.textAlign="left"; ctx.textBaseline="top";
+  ctx.fillText(s?"siła "+s:"anuluj",mx,my+12);
 }
-function onOrient(e){ if(e.gamma==null) return;
-  leanTarget=Math.max(-1,Math.min(1,e.gamma/45))*0.12;
-  if(!peak){ const g=e.gamma; aimZone = g<-12?-1 : g>12?1 : (Math.abs(g)<7?0:aimZone); } }
-async function enableMotion(){
-  try{
-    if(typeof DeviceMotionEvent==="undefined") throw new Error("none");
-    if(typeof DeviceMotionEvent.requestPermission==="function"){
-      const r=await DeviceMotionEvent.requestPermission(); if(r!=="granted") throw new Error("denied");
-      if(typeof DeviceOrientationEvent!=="undefined"&&typeof DeviceOrientationEvent.requestPermission==="function"){ try{ await DeviceOrientationEvent.requestPermission(); }catch(_){} }
-    }
-    addEventListener("devicemotion",onMotion); addEventListener("deviceorientation",onOrient); motionOn=true;
-    $("motion-state").textContent="ruch włączony"; $("motion-state").classList.add("on"); $("b-motion").hidden=true;
-    $("hint").textContent="Przechyl telefon w lewo, w prawo albo trzymaj prosto, żeby wycelować w część drzewa. Zaznaczone liście spadną po jednym potrząśnięciu.";
-    setTimeout(()=>{ if(!gotEvent){ $("motion-state").textContent="brak danych z czujników"; $("motion-state").classList.remove("on"); } },1500);
-  }catch(err){
-    $("motion-state").textContent="ruch niedostępny"; $("b-motion").hidden=true;
-    $("hint").textContent=err.message==="denied"?"Brak zgody na czujniki. Odśwież stronę i zezwól albo używaj przycisku wstrząsu.":"To urządzenie nie ma czujników ruchu. Używaj przycisku wstrząsu.";
-  }
-}
-$("b-motion").onclick=enableMotion;
 
 // ---------- controls ----------
 function setMode(m){ mode=m; $("b-daily").setAttribute("aria-pressed",m==="daily"); $("b-random").setAttribute("aria-pressed",m==="random");
