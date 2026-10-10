@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Ostatni Liść</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bagel+Fat+One&family=Nunito:wght@400;600;800&display=swap">
+<style>
+/* Layout: one-screen game — compact header, full-height canvas tree, result card over the canvas, controls bar below */
+:root{
+  --sky:#dce5ea; --sky2:#c7d4dc; --ink:#24303a; --muted:#5d6b76;
+  --bark:#4a3a30; --ground:#b9c6cc; --card:#f6f8f9; --accent:#c9572c; --mark:#1f2a33;
+  --display:"Bagel Fat One", "Arial Rounded MT Bold", system-ui, sans-serif;
+  --body:"Nunito", system-ui, -apple-system, sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --sky:#141b23; --sky2:#1d2833; --ink:#e7edf1; --muted:#97a6b2;
+  --bark:#3a2d25; --ground:#26323c; --card:#1f2a34; --accent:#ec7a45; --mark:#f4f7f9; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --sky:#141b23; --sky2:#1d2833; --ink:#e7edf1; --muted:#97a6b2;
+  --bark:#3a2d25; --ground:#26323c; --card:#1f2a34; --accent:#ec7a45; --mark:#f4f7f9; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+[hidden]{display:none!important}
+body{background:var(--sky);color:var(--ink);font-family:var(--body);overflow:hidden;
+  display:flex;flex-direction:column;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);overscroll-behavior:none}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:12px 16px 4px}
+h1{font-family:var(--display);font-weight:400;font-size:1.7rem;line-height:1;margin:0;color:var(--accent);letter-spacing:.01em}
+.sub{font-size:.8rem;color:var(--muted);margin-top:4px}
+.stats{display:flex;gap:14px;font-variant-numeric:tabular-nums;text-align:right}
+.stat b{display:block;font-size:1.35rem;font-weight:800;line-height:1}
+.stat span{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.hint{padding:0 16px;font-size:.85rem;color:var(--muted);min-height:2.6em}
+.legend{display:flex;align-items:center;gap:6px;padding:4px 16px 0;font-size:.72rem;color:var(--muted)}
+.legend i{width:14px;height:9px;border-radius:9px 1px 9px 1px;display:inline-block}
+#wrap{position:relative;flex:1;min-height:0}
+canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:pointer}
+.bar{display:flex;gap:8px;padding:8px 16px 14px;flex-wrap:wrap}
+button{font:inherit;font-weight:800;border:0;border-radius:999px;padding:10px 16px;cursor:pointer;
+  background:var(--card);color:var(--ink);box-shadow:0 1px 0 rgba(0,0,0,.08);touch-action:none}
+button.primary{background:var(--accent);color:#fff}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button[aria-pressed="true"]{outline:2px solid var(--accent)}
+#motion-state{font-size:.75rem;font-weight:800;padding:2px 8px;border-radius:999px;background:var(--card);color:var(--muted);margin-left:6px}
+#motion-state.on{background:var(--accent);color:#fff}
+#b-shake{font-variant-numeric:tabular-nums;min-width:9.5em}
+#result{position:absolute;left:16px;right:16px;top:50%;transform:translateY(-50%);max-width:360px;margin:auto;
+  background:var(--card);border-radius:20px;padding:22px;text-align:center;box-shadow:0 18px 40px rgba(0,0,0,.25)}
+#result h2{font-family:var(--display);font-weight:400;font-size:1.8rem;margin:0 0 6px;color:var(--accent);text-wrap:balance}
+#result p{margin:0 0 16px;color:var(--muted)}
+#result .row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+</style>
+
+</head>
+<body>
+<header>
+  <div>
+    <h1>Ostatni Liść</h1>
+    <div class="sub"><span id="mode-label">Drzewo dnia</span><span id="motion-state">ruch wyłączony</span></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><b id="s-left">0</b><span>liści</span></div>
+    <div class="stat"><b id="s-moves">0</b><span>ruchów</span></div>
+    <div class="stat"><b id="s-best">–</b><span>rekord</span></div>
+  </div>
+</header>
+<div class="hint" id="hint">Stuknij liść, by go zerwać. Przytrzymaj, by zobaczyć skutki, i odsuń palec, by anulować. Zostaw dokładnie jeden.</div>
+<div class="legend" aria-label="Siła chwytu liści">
+  <span>słaby</span>
+  <i style="background:#d8c27e"></i><i style="background:#e9a63a"></i><i style="background:#e0712c"></i><i style="background:#c4412a"></i><i style="background:#8e2a1c"></i>
+  <span>mocny</span>
+</div>
+<div id="wrap">
+  <canvas id="c" aria-label="Drzewo z liśćmi"></canvas>
+  <div id="result" hidden>
+    <h2 id="r-title"></h2>
+    <p id="r-text"></p>
+    <div class="row">
+      <button class="primary" id="r-again">Jeszcze raz</button>
+      <button id="r-share">Kopiuj wynik</button>
+    </div>
+  </div>
+</div>
+<div class="bar">
+  <button class="primary" id="b-motion">Włącz ruch</button>
+  <button id="b-shake">Przytrzymaj: wstrząs</button>
+  <button id="b-nums" aria-pressed="false">Liczby</button>
+  <button id="b-daily" aria-pressed="true">Drzewo dnia</button>
+  <button id="b-random" aria-pressed="false">Losowe</button>
+  <button id="b-restart">Od nowa</button>
+</div>
+
+<script>
+(() => {
+const W=400, H=600, GROUND=575;
+const NEAR=34, FAR=68;               // tap damage rings: 2 inside NEAR, 1 inside FAR
+const GRIP_COL=["","#d8c27e","#e9a63a","#e0712c","#c4412a","#8e2a1c"];
+const cv=document.getElementById("c"), ctx=cv.getContext("2d");
+const $=id=>document.getElementById(id);
+const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function rng(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed);
+  t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function todayKey(){ const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function hash(s){ let h=2166136261; for(const c of s){ h^=c.charCodeAt(0); h=Math.imul(h,16777619);} return h>>>0; }
+function store(k,v){ try{ if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k,v);}catch(e){ return null; } }
+
+let mode="daily", seed=hash(todayKey()), branches=[], leaves=[], fallen=[], pile=[], moves=0, over=false;
+let lean=0, leanTarget=0, showNums=false, jolt=0, holding=null, charging=null, lastMove=null;
+
+function bestKey(){ return mode==="daily" ? "ol-grip-best-"+todayKey() : null; }
+
+function pickGrip(r){ return r<.25?1 : r<.5?2 : r<.72?3 : r<.88?4 : 5; }
+
+function build(){
+  const R=rng(seed);
+  branches=[]; leaves=[]; fallen=[]; pile=[]; moves=0; over=false; lastMove=null;
+  let bid=0;
+  function grow(x,y,ang,len,w,depth){
+    const x2=x+Math.cos(ang)*len, y2=y+Math.sin(ang)*len, id=bid++;
+    branches.push({x,y,x2,y2,w});
+    if(depth>=2){
+      const n=depth>=4?3:2;
+      for(let i=0;i<n;i++){
+        const t=0.45+R()*0.55, side=R()<.5?-1:1;
+        leaves.push({ax:x+(x2-x)*t, ay:y+(y2-y)*t, ang:ang+side*(0.6+R()*0.9), size:11+R()*6,
+          grip:pickGrip(R()), ph:R()*6.28, wob:0, on:true, flash:0});
+      }
+    }
+    if(depth<5){
+      const kids=depth<2?3:2;
+      for(let k=0;k<kids;k++){
+        const spread=(k-(kids-1)/2)*(0.55+R()*0.25)+(R()-.5)*0.3;
+        grow(x2,y2,ang+spread,len*(0.68+R()*0.12),w*0.66,depth+1);
+      }
+    }
+  }
+  grow(W/2,GROUND,-Math.PI/2+(R()-.5)*0.08,120,18,0);
+  leaves=leaves.filter((l,i)=>!leaves.slice(0,i).some(o=>Math.hypot(o.ax-l.ax,o.ay-l.ay)<9));
+  while(leaves.length>40) leaves.splice(Math.floor(R()*leaves.length),1);
+  for(const l of leaves){ l.cx=l.ax+Math.cos(l.ang)*l.size*0.8; l.cy=l.ay+Math.sin(l.ang)*l.size*0.8; }
+  $("result").hidden=true;
+  updateStats();
+}
+
+const alive=()=>leaves.filter(l=>l.on);
+function updateStats(){
+  $("s-left").textContent=alive().length; $("s-moves").textContent=moves;
+  const k=bestKey(), b=k?store(k):null; $("s-best").textContent=b?b:"–";
+}
+
+// One rule set, used for both the preview and the real move, so the preview is always exact.
+function tapDamage(d){ return d<NEAR?2 : d<FAR?1 : 0; }
+function effects(action){
+  const fall=new Set(), dmg=new Map();
+  if(action.type==="tap"){
+    fall.add(action.leaf);
+    for(const l of alive()){ if(l===action.leaf) continue;
+      const v=tapDamage(Math.hypot(l.ax-action.leaf.ax,l.ay-action.leaf.ay));
+      if(v){ dmg.set(l,v); if(l.grip<=v) fall.add(l); } }
+  } else {
+    for(const l of alive()){ dmg.set(l,action.s); if(l.grip<=action.s) fall.add(l); }
+  }
+  return {fall,dmg};
+}
+
+function apply(action){
+  if(over) return;
+  const {fall,dmg}=effects(action);
+  moves++; jolt=action.type==="shake"?0.4+action.s*0.25:0.5;
+  const ox=action.type==="tap"?action.leaf.ax:W/2, oy=action.type==="tap"?action.leaf.ay:GROUND-200;
+  for(const [l,v] of dmg){ l.grip-=v; l.wob=1; l.flash=1; }
+  for(const l of fall){ l.on=false;
+    const d=Math.hypot(l.ax-ox,l.ay-oy), delay=action.type==="tap"&&l===action.leaf?0:60+d*3;
+    setTimeout(()=>fallen.push({x:l.ax,y:l.ay,vx:(l.ax-ox)*0.004,vy:0,rot:l.ang,vr:(l.ax>ox?1:-1)*0.04,
+      size:l.size,col:GRIP_COL[Math.max(1,l.grip+(dmg.get(l)||0))],ph:l.ph}),delay); }
+  lastMove={type:action.type,s:action.s,count:fall.size};
+  updateStats();
+  const n=alive().length;
+  if(n<=1){ over=true; setTimeout(()=>finish(n),1300); }
+}
+
+function finish(n){
+  const win=n===1;
+  $("r-title").textContent=win?"Został jeden!":"Gołe drzewo";
+  if(win){
+    const k=bestKey(); let rec="";
+    if(k){ const b=+store(k)||0; if(!b||moves<b){ store(k,String(moves)); rec=" Nowy rekord dnia."; } }
+    $("r-text").textContent="Ostatni liść trzyma się gałęzi. Ruchy: "+moves+"."+rec;
+  } else {
+    const what=lastMove.type==="tap"?"Ostatnie stuknięcie":"Ostatni wstrząs (siła "+lastMove.s+")";
+    $("r-text").textContent=what+" strąciło naraz "+lastMove.count+" "+(lastMove.count%10>=2&&lastMove.count%10<=4&&(lastMove.count%100<12||lastMove.count%100>14)?"liście":"liści")+". Przytrzymaj liść przed ruchem, żeby to zobaczyć.";
+  }
+  $("r-share").dataset.text=(win?"🍂 Ostatni liść: 1 liść w "+moves+" ruchach":"🍂 Ostatni liść: drzewo wygrało ze mną")+(mode==="daily"?" (drzewo dnia "+todayKey()+")":"");
+  $("result").hidden=false; updateStats();
+}
+
+// ---------- input: canvas ----------
+function toLogical(e){ const r=cv.getBoundingClientRect(); const x=(e.clientX-r.left-ox)/scale, y=(e.clientY-r.top-oy)/scale;
+  const c=Math.cos(-lean), s=Math.sin(-lean), dx=x-W/2, dy=y-GROUND; return [W/2+dx*c-dy*s, GROUND+dx*s+dy*c]; }
+function hitLeaf(px,py){ let best=null,bd=26;
+  for(const l of alive()){ const d=Math.hypot(l.cx-px,l.cy-py); if(d<bd){bd=d;best=l;} } return best; }
+cv.addEventListener("pointerdown",e=>{
+  if(over) return; const [x,y]=toLogical(e), l=hitLeaf(x,y); if(!l) return;
+  holding={leaf:l,x,y,t:performance.now(),cancel:false}; try{cv.setPointerCapture(e.pointerId);}catch(_){}
+});
+cv.addEventListener("pointermove",e=>{ if(!holding) return; const [x,y]=toLogical(e);
+  const moved=Math.hypot(x-holding.x,y-holding.y)>30;
+  if(moved!==holding.cancel){ holding.cancel=moved; setHint(); } });
+cv.addEventListener("pointerup",()=>{ if(holding&&!holding.cancel) apply({type:"tap",leaf:holding.leaf}); holding=null; setHint(); });
+cv.addEventListener("pointercancel",()=>{ holding=null; setHint(); });
+
+// ---------- input: shake button (hold to charge 1→2→3) ----------
+const sb=$("b-shake");
+function chargeLevel(){ return charging?Math.min(3,1+Math.floor((performance.now()-charging.t)/650)):1; }
+sb.addEventListener("pointerdown",e=>{ if(over) return; e.preventDefault(); charging={t:performance.now(),cancel:false}; try{sb.setPointerCapture(e.pointerId);}catch(_){} });
+sb.addEventListener("pointermove",e=>{ if(!charging) return; const r=sb.getBoundingClientRect();
+  charging.cancel = e.clientX<r.left-30||e.clientX>r.right+30||e.clientY<r.top-40||e.clientY>r.bottom+30; });
+sb.addEventListener("pointerup",()=>{ if(charging&&!charging.cancel) apply({type:"shake",s:chargeLevel()}); charging=null; sb.textContent="Przytrzymaj: wstrząs"; });
+sb.addEventListener("pointercancel",()=>{ charging=null; sb.textContent="Przytrzymaj: wstrząs"; });
+sb.addEventListener("click",e=>{ if(e.detail===0) apply({type:"shake",s:1}); }); // keyboard
+
+function setHint(){
+  const h=$("hint");
+  if(holding&&holding.cancel) h.textContent="Puść teraz, a ruch zostanie anulowany.";
+  else if(holding) h.textContent="Puść, żeby zerwać. Zaznaczone liście spadną, przerywane stracą chwyt.";
+  else if(charging) h.textContent="Im dłużej trzymasz, tym mocniejszy wstrząs. Zaznaczone liście spadną.";
+  else h.textContent="Stuknij liść, by go zerwać. Przytrzymaj, by zobaczyć skutki, i odsuń palec, by anulować. Zostaw dokładnie jeden.";
+}
+
+// ---------- drawing ----------
+let theme={}, frame=0;
+function readTheme(){ const s=getComputedStyle(document.documentElement);
+  for(const k of ["sky","sky2","bark","ground","mark","accent"]) theme[k]=s.getPropertyValue("--"+k).trim(); }
+let scale=1, ox=0, oy=0, dpr=1;
+function resize(){
+  const r=cv.getBoundingClientRect(); dpr=Math.min(devicePixelRatio||1,2);
+  cv.width=r.width*dpr; cv.height=r.height*dpr;
+  scale=Math.min(r.width/W,r.height/H); ox=(r.width-W*scale)/2; oy=(r.height-H*scale);
+  ctx.setTransform(dpr*scale,0,0,dpr*scale,dpr*ox,dpr*oy);
+}
+function leafShape(size){ ctx.beginPath(); ctx.moveTo(0,0);
+  ctx.quadraticCurveTo(size*0.5,-size*0.55,size*1.6,0); ctx.quadraticCurveTo(size*0.5,size*0.55,0,0); ctx.closePath(); }
+function drawLeaf(x,y,rot,size,col,grip,mark){
+  ctx.save(); ctx.translate(x,y); ctx.rotate(rot);
+  if(grip===1){ ctx.translate(2,0); } // cracked stem: leaf hangs off its point
+  leafShape(size); ctx.fillStyle=col; ctx.fill();
+  ctx.strokeStyle="rgba(50,20,8,.35)"; ctx.lineWidth=0.8; ctx.beginPath(); ctx.moveTo(1,0); ctx.lineTo(size*1.3,0); ctx.stroke();
+  if(grip===1){ ctx.strokeStyle="rgba(50,20,8,.6)"; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(-2,-2); ctx.lineTo(0,2); ctx.stroke(); }
+  if(mark){ leafShape(size); ctx.strokeStyle=theme.mark; ctx.lineWidth=mark==="fall"?2.4:1.3;
+    ctx.setLineDash(mark==="fall"?[]:[3,2]); ctx.stroke(); ctx.setLineDash([]); }
+  ctx.restore();
+}
+function draw(t){
+  if(frame++%30===0) readTheme();
+  const g=ctx.createLinearGradient(0,-oy/scale,0,H); g.addColorStop(0,theme.sky2); g.addColorStop(1,theme.sky);
+  ctx.fillStyle=g; ctx.fillRect(-ox/scale-2,-oy/scale-2,W+2*ox/scale+4,H+oy/scale+4);
+  ctx.fillStyle=theme.ground; ctx.beginPath(); ctx.ellipse(W/2,GROUND+30,W*0.75,42,0,0,Math.PI*2); ctx.fill();
+
+  // preview
+  let prev=null, centre=null;
+  if(holding && !holding.cancel && performance.now()-holding.t>200){ prev=effects({type:"tap",leaf:holding.leaf}); centre=holding.leaf; }
+  if(charging){ const s=chargeLevel(); prev=effects({type:"shake",s});
+    sb.textContent=charging.cancel?"Puść, aby anulować":"Wstrząs: siła "+s+" "+"●".repeat(s)+"○".repeat(3-s); }
+
+  const sx=jolt>0&&!reduce?Math.sin(t/22)*jolt*0.03:0; jolt=Math.max(0,jolt-0.03);
+  ctx.save(); ctx.translate(W/2,GROUND); lean+=(leanTarget-lean)*0.08; ctx.rotate(sx+lean); ctx.translate(-W/2,-GROUND);
+  ctx.strokeStyle=theme.bark; ctx.lineCap="round";
+  for(const b of branches){ ctx.lineWidth=b.w; ctx.beginPath(); ctx.moveTo(b.x,b.y); ctx.lineTo(b.x2,b.y2); ctx.stroke(); }
+  if(centre){ ctx.strokeStyle=theme.mark; ctx.globalAlpha=0.25; ctx.lineWidth=1;
+    for(const r of [NEAR,FAR]){ ctx.beginPath(); ctx.arc(centre.ax,centre.ay,r,0,Math.PI*2); ctx.stroke(); }
+    ctx.globalAlpha=1; }
+  const wind=reduce?0:1;
+  for(const l of leaves){ if(!l.on) continue;
+    const weak=(5-l.grip)/4; // 0 strong .. 1 weakest
+    const idle=Math.sin(t/(420-weak*260)+l.ph)*(0.02+weak*0.2)*wind;
+    const w=Math.sin(t/40+l.ph)*l.wob*0.5*wind; l.wob*=0.94;
+    let mark=null; if(prev){ if(prev.fall.has(l)) mark="fall"; else if(prev.dmg.has(l)) mark="dmg"; }
+    drawLeaf(l.ax,l.ay,l.ang+idle+w,l.size,GRIP_COL[l.grip],l.grip,mark);
+    if(showNums){ ctx.fillStyle=theme.mark; ctx.font="800 10px Nunito, sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText(l.grip,l.cx,l.cy); }
+  }
+  ctx.restore();
+
+  for(const p of pile) drawLeaf(p.x,p.y,p.rot,p.size,p.col,2,null);
+  for(let i=fallen.length-1;i>=0;i--){ const f=fallen[i];
+    f.vy=Math.min(f.vy+0.05,1.6); f.ph+=0.05;
+    f.x+=f.vx+Math.sin(f.ph)*0.9; f.y+=f.vy; f.rot+=f.vr+Math.cos(f.ph)*0.02;
+    const floor=GROUND+8+((Math.abs(f.x)*7)%14);
+    if(f.y>=floor){ f.y=floor; pile.push(f); fallen.splice(i,1); if(pile.length>80) pile.shift(); }
+    drawLeaf(f.x,f.y,f.rot,f.size,f.col,2,null); }
+  requestAnimationFrame(draw);
+}
+
+
+// ---------- motion: tilt leans the tree, a real shake = strength 1-3 by how hard you move ----------
+let lastAcc=null, peak=0, peakT=0, lastShakeT=0, gotEvent=false;
+addEventListener("devicemotion",()=>{gotEvent=true;},{once:true});
+function onMotion(e){
+  let mag; const a=e.acceleration;
+  if(a&&a.x!=null) mag=Math.hypot(a.x,a.y,a.z);
+  else { const g=e.accelerationIncludingGravity; if(!g||g.x==null) return;
+    if(lastAcc) mag=Math.hypot(g.x-lastAcc.x,g.y-lastAcc.y,g.z-lastAcc.z); lastAcc={x:g.x,y:g.y,z:g.z}; if(mag==null) return; }
+  const now=performance.now();
+  if(mag>13){ peak=Math.max(peak,mag); peakT=now; }
+  if(peak&&now-peakT>160&&now-lastShakeT>800){
+    const s=peak<22?1:peak<34?2:3; lastShakeT=now; peak=0;
+    if(!over){ apply({type:"shake",s}); $("hint").textContent="Wstrząs o sile "+s+". Lekki ruch to 1, mocny to 3.";
+      try{ navigator.vibrate&&navigator.vibrate(30*s); }catch(_){} }
+  }
+}
+function onOrient(e){ if(e.gamma==null) return; leanTarget=Math.max(-1,Math.min(1,e.gamma/45))*0.12; }
+async function enableMotion(){
+  try{
+    if(typeof DeviceMotionEvent==="undefined") throw new Error("none");
+    if(typeof DeviceMotionEvent.requestPermission==="function"){
+      const r=await DeviceMotionEvent.requestPermission(); if(r!=="granted") throw new Error("denied");
+      if(typeof DeviceOrientationEvent!=="undefined"&&typeof DeviceOrientationEvent.requestPermission==="function"){ try{ await DeviceOrientationEvent.requestPermission(); }catch(_){} }
+    }
+    addEventListener("devicemotion",onMotion); addEventListener("deviceorientation",onOrient);
+    $("motion-state").textContent="ruch włączony"; $("motion-state").classList.add("on"); $("b-motion").hidden=true;
+    $("hint").textContent="Potrząśnij telefonem: lekko to siła 1, mocno to siła 3. Przechylenie pochyla drzewo.";
+    setTimeout(()=>{ if(!gotEvent){ $("motion-state").textContent="brak danych z czujników"; $("motion-state").classList.remove("on"); } },1500);
+  }catch(err){
+    $("motion-state").textContent="ruch niedostępny"; $("b-motion").hidden=true;
+    $("hint").textContent=err.message==="denied"?"Brak zgody na czujniki. Odśwież stronę i zezwól albo używaj przycisku wstrząsu.":"To urządzenie nie ma czujników ruchu. Używaj przycisku wstrząsu.";
+  }
+}
+$("b-motion").onclick=enableMotion;
+
+// ---------- controls ----------
+function setMode(m){ mode=m; $("b-daily").setAttribute("aria-pressed",m==="daily"); $("b-random").setAttribute("aria-pressed",m==="random");
+  $("mode-label").textContent=m==="daily"?"Drzewo dnia":"Losowe drzewo";
+  seed=m==="daily"?hash(todayKey()):(Math.random()*1e9)|0; build(); }
+$("b-daily").onclick=()=>setMode("daily");
+$("b-random").onclick=()=>setMode("random");
+$("b-restart").onclick=build;
+$("r-again").onclick=build;
+$("b-nums").onclick=e=>{ showNums=!showNums; e.currentTarget.setAttribute("aria-pressed",showNums); };
+$("r-share").onclick=async e=>{ const btn=e.currentTarget, txt=btn.dataset.text||"";
+  try{ await navigator.clipboard.writeText(txt); btn.textContent="Skopiowano"; }
+  catch(err){ $("r-text").textContent=txt; btn.textContent="Zaznacz tekst wyżej"; }
+  setTimeout(()=>{ btn.textContent="Kopiuj wynik"; },1800); };
+addEventListener("resize",resize);
+readTheme(); resize(); build(); requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>
