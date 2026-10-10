@@ -114,7 +114,18 @@ function rng(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Ma
 
 // ---------- sound ----------
 let AC=null;
-function audio(){ if(!AC){ try{ AC=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(AC&&AC.state==="suspended") AC.resume(); return AC; }
+// iOS: "playback" makes sound play like a music app, even with the silent switch on (Safari 17+).
+try{ if(navigator.audioSession) navigator.audioSession.type="playback"; }catch(e){}
+let unlocked=false;
+function audio(){
+  if(!AC){ try{ AC=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  if(AC&&AC.state!=="running") AC.resume();
+  if(AC&&!unlocked){ unlocked=true; // a silent buffer started inside a tap unlocks output on iOS
+    try{ const b=AC.createBuffer(1,1,22050), s=AC.createBufferSource(); s.buffer=b; s.connect(AC.destination); s.start(0); }catch(e){} }
+  return AC;
+}
+// pointerdown is not always a user activation on iOS; touchend and click are
+["touchend","click"].forEach(ev=>addEventListener(ev,()=>audio(),{passive:true}));
 function click(freq,dur,vol,type){
   const a=audio(); if(!a) return; const t=a.currentTime;
   const o=a.createOscillator(), g=a.createGain(), f=a.createBiquadFilter();
