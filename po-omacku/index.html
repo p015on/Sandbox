@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Po Omacku</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Nunito:wght@400;600;800&display=swap">
+<style>
+/* Layout: one dark world on purpose (inside of a drawer) — header, target line, the drawer canvas, a bar of controls; texture panel slides over the drawer */
+:root{
+  --room:#1b1613; --velvet:#2a201b; --velvet2:#352821; --ink:#efe6dc; --muted:#a8988a;
+  --brass:#d2a861; --brass-dim:#8a6c3d; --ok:#8fc58a; --bad:#e08a6b;
+  --display:"Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --body:"Nunito", system-ui, -apple-system, sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+[hidden]{display:none!important}
+body{background:var(--room);color:var(--ink);font-family:var(--body);overflow:hidden;margin:0;
+  display:flex;flex-direction:column;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);overscroll-behavior:none}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:14px 16px 2px}
+h1{font-family:var(--display);font-weight:800;font-size:1.65rem;line-height:1;margin:0;letter-spacing:-.01em}
+h1 span{color:var(--brass)}
+.stats{display:flex;gap:14px;font-variant-numeric:tabular-nums;text-align:right}
+.stat b{display:block;font-size:1.3rem;font-weight:800;line-height:1}
+.stat span{font-size:.66rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.target{margin:8px 16px 0;padding:8px 12px;border-radius:12px;background:var(--velvet);font-size:.9rem;display:flex;gap:8px;align-items:center}
+.target b{color:var(--brass)}
+.hint{padding:6px 16px 0;font-size:.82rem;color:var(--muted);min-height:2.5em}
+#wrap{position:relative;flex:1;min-height:0;margin:6px 16px 0}
+canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;border-radius:18px}
+.bar{display:flex;gap:8px;padding:10px 16px 14px;flex-wrap:wrap}
+button{font:inherit;font-weight:800;border:0;border-radius:999px;padding:10px 15px;cursor:pointer;background:var(--velvet2);color:var(--ink)}
+button.primary{background:var(--brass);color:#1b1613}
+button:focus-visible{outline:3px solid var(--brass);outline-offset:2px}
+button[aria-pressed="true"]{outline:2px solid var(--brass)}
+.overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:16px}
+.card{background:var(--velvet2);border-radius:20px;padding:20px;max-width:340px;width:100%;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.5)}
+.card h2{font-family:var(--display);font-weight:800;font-size:1.6rem;margin:0 0 6px;color:var(--brass);text-wrap:balance}
+.card p{margin:0 0 14px;color:var(--muted);line-height:1.45}
+.card .row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stars{font-size:1.6rem;letter-spacing:.2em;color:var(--brass);margin-bottom:6px}
+#textures .card{text-align:left}
+.tex{display:grid;grid-template-columns:1fr auto;gap:8px 10px;align-items:center;margin-bottom:14px}
+.tex div{min-width:0}
+.tex small{display:block;color:var(--muted);font-size:.78rem;line-height:1.3}
+.tex button{padding:7px 12px;font-size:.85rem}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Po <span>Omacku</span></h1>
+  <div class="stats">
+    <div class="stat"><b id="s-level">1</b><span>szuflada</span></div>
+    <div class="stat"><b id="s-grabs">0</b><span>chwyty</span></div>
+  </div>
+</header>
+<div class="target" id="target">Znajdź <b>klucz z trzema ząbkami</b></div>
+<div class="hint" id="hint">Wodź palcem po ciemnej szufladzie i słuchaj. Krótkie stuknięcie to chwyt.</div>
+<div id="wrap">
+  <canvas id="c" aria-label="Ciemna szuflada pełna drobiazgów"></canvas>
+
+  <div class="overlay" id="start">
+    <div class="card">
+      <h2>Ręka w szufladzie</h2>
+      <p>Gdzieś w ciemności leży klucz. Przesuwaj palcem i słuchaj, bo każdy drobiazg ma inną fakturę. Gdy go rozpoznasz, stuknij, żeby chwycić. Im mniej chwytów, tym lepiej.</p>
+      <p>Podgłośnij telefon lub załóż słuchawki.</p>
+      <div class="row"><button class="primary" id="b-start">Wkładam rękę</button></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="textures" hidden>
+    <div class="card">
+      <h2>Faktury</h2>
+      <div class="tex">
+        <div><b>Klucz z 3 ząbkami</b><small>Trzy nierówne stuknięcia, gdy przesuwasz wzdłuż klucza.</small></div><button data-s="key3">Posłuchaj</button>
+        <div><b>Inne klucze</b><small>Dwa albo pięć ząbków, w równych odstępach.</small></div><button data-s="key5">Posłuchaj</button>
+        <div><b>Moneta</b><small>Gładki środek, gęste prążki na brzegu.</small></div><button data-s="coin">Posłuchaj</button>
+        <div><b>Guzik</b><small>Cztery dziurki, głuche puknięcia.</small></div><button data-s="button">Posłuchaj</button>
+        <div><b>Spinacz</b><small>Równe, średnie tyknięcia jak po drucie.</small></div><button data-s="clip">Posłuchaj</button>
+        <div><b>Kulka</b><small>Tylko miękkie stuknięcie na brzegu, potem cisza.</small></div><button data-s="marble">Posłuchaj</button>
+      </div>
+      <div class="row"><button class="primary" id="b-tex-close">Wracam do szuflady</button></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="result" hidden>
+    <div class="card">
+      <div class="stars" id="r-stars"></div>
+      <h2 id="r-title">Mam go!</h2>
+      <p id="r-text"></p>
+      <div class="row"><button class="primary" id="b-next">Następna szuflada</button><button id="b-retry">Jeszcze raz</button></div>
+    </div>
+  </div>
+</div>
+<div class="bar">
+  <button id="b-tex">Faktury</button>
+  <button id="b-peek" aria-pressed="false">Podejrzyj</button>
+  <button id="b-new">Inna szuflada</button>
+</div>
+
+<script>
+(() => {
+const W=400, H=560, R=22;
+const cv=document.getElementById("c"), ctx=cv.getContext("2d");
+const $=id=>document.getElementById(id);
+const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function rng(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed);
+  t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+// ---------- sound ----------
+let AC=null;
+function audio(){ if(!AC){ try{ AC=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(AC&&AC.state==="suspended") AC.resume(); return AC; }
+function click(freq,dur,vol,type){
+  const a=audio(); if(!a) return; const t=a.currentTime;
+  const o=a.createOscillator(), g=a.createGain(), f=a.createBiquadFilter();
+  o.type=type||"square"; o.frequency.setValueAtTime(freq,t);
+  f.type="bandpass"; f.frequency.value=freq; f.Q.value=6;
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vol,t+0.003); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(f); f.connect(g); g.connect(a.destination); o.start(t); o.stop(t+dur+0.02);
+}
+function buzz(ms){ try{ navigator.vibrate&&navigator.vibrate(ms); }catch(e){} }
+// one voice per material
+const VOICE={
+  key3:()=>{ click(2300,0.05,0.35,"triangle"); click(4600,0.03,0.08,"sine"); buzz(14); },
+  key2:()=>VOICE.key3(), key5:()=>VOICE.key3(),
+  coin:()=>{ click(3600,0.018,0.18); buzz(4); },
+  button:()=>{ click(240,0.06,0.5,"sine"); buzz(18); },
+  clip:()=>{ click(1300,0.02,0.22); buzz(6); },
+  bump:()=>{ click(170,0.07,0.45,"sine"); buzz(10); },
+  empty:()=>{ click(120,0.12,0.25,"sine"); },
+  wrong:()=>{ click(330,0.09,0.3,"sawtooth"); setTimeout(()=>click(250,0.12,0.3,"sawtooth"),90); },
+  win:()=>{ [523,659,784,1046].forEach((f,i)=>setTimeout(()=>click(f,0.25,0.25,"triangle"),i*90)); }
+};
+// demo patterns for the texture panel (ms offsets)
+const DEMO={ key3:[0,140,420], key5:[0,150,300,450,600], coin:[0,40,80,120,160,200,240,280], button:[0,260,520,780], clip:[0,90,180,270,360,450], marble:[0] };
+
+// ---------- items and their textures ----------
+// Teeth are positions along the key's length. The target has three uneven teeth; decoys are evenly spaced.
+const TEETH={ key3:[-11,-3,12], key2:[-6,8], key5:[-14,-7,0,7,14] };
+function feature(it,x,y){
+  const dx=x-it.x, dy=y-it.y, c=Math.cos(-it.rot), s=Math.sin(-it.rot);
+  const lx=dx*c-dy*s, ly=dx*s+dy*c, r=Math.hypot(lx,ly);
+  switch(it.type){
+    case "coin": return r<R*0.62 ? null : "r"+Math.floor((Math.atan2(ly,lx)+Math.PI)/(2*Math.PI)*28);
+    case "button": { for(const [hx,hy] of [[-6,-6],[6,-6],[-6,6],[6,6]]) if(Math.hypot(lx-hx,ly-hy)<4) return "h"+hx+hy; return null; }
+    case "clip": return Math.abs(ly)<9 ? "w"+Math.floor((lx+R)/5.5) : null;
+    case "marble": return null;
+    default: { const tt=TEETH[it.type]; for(let i=0;i<tt.length;i++) if(Math.abs(lx-tt[i])<2.6) return "t"+i; return null; }
+  }
+}
+
+let level=1, seed=(Math.random()*1e9)|0, items=[], grabs=0, done=false, peek=false;
+let trail=[], finger=null, cur=null, lastFeat=null, lastTick=0;
+
+function build(){
+  const r=rng(seed+level*7919);
+  const n=Math.min(16,5+level*2);
+  const pool=["coin","coin","button","clip","marble"];
+  if(level>=2) pool.push("key2");
+  if(level>=3) pool.push("key5","key2");
+  const types=["key3"]; while(types.length<n) types.push(pool[Math.floor(r()*pool.length)]);
+  items=[]; let guard=0;
+  for(const type of types){
+    let x,y; do{ x=R+12+r()*(W-2*R-24); y=R+12+r()*(H-2*R-24); guard++; }
+    while(items.some(o=>Math.hypot(o.x-x,o.y-y)<R*2+14) && guard<5000);
+    items.push({type,x,y,rot:r()*Math.PI*2,shown:false});
+  }
+  grabs=0; done=false; trail=[]; cur=null; lastFeat=null;
+  $("s-level").textContent=level; $("s-grabs").textContent=grabs; $("result").hidden=true;
+  $("hint").textContent= level===1 ? "Wodź palcem po ciemnej szufladzie i słuchaj. Krótkie stuknięcie to chwyt."
+    : level===2 ? "Pojawił się klucz z dwoma ząbkami. Szukaj trzech, nierównych."
+    : "Kluczy jest więcej. Przesuń palec wzdłuż każdego i policz ząbki.";
+}
+
+function itemAt(x,y){ for(const it of items) if(Math.hypot(it.x-x,it.y-y)<R) return it; return null; }
+
+function explore(x,y){
+  const it=itemAt(x,y);
+  if(it!==cur){ cur=it; lastFeat=null; if(it) VOICE.bump(); }
+  if(!it) return;
+  const f=feature(it,x,y);
+  if(f!==lastFeat){ lastFeat=f;
+    const now=performance.now();
+    if(f!==null && now-lastTick>22){ lastTick=now; (VOICE[it.type]||VOICE.bump)(); } }
+}
+
+function grab(x,y){
+  if(done) return;
+  const it=itemAt(x,y);
+  if(!it){ VOICE.empty(); $("hint").textContent="Pusto. Tu nic nie ma."; return; }
+  grabs++; $("s-grabs").textContent=grabs;
+  if(it.type==="key3"){ done=true; it.shown=true; VOICE.win(); setTimeout(win,500); return; }
+  it.shown=true; VOICE.wrong();
+  const name={coin:"monetę",button:"guzik",clip:"spinacz",marble:"kulkę",key2:"klucz z dwoma ząbkami",key5:"klucz z pięcioma ząbkami"}[it.type];
+  $("hint").textContent="Wyciągasz "+name+". Odkładasz i szukasz dalej.";
+}
+
+function win(){
+  for(const it of items) it.shown=true;
+  const st=grabs===1?3:grabs===2?2:1;
+  $("r-stars").textContent="★".repeat(st)+"☆".repeat(3-st);
+  $("r-title").textContent=grabs===1?"Za pierwszym razem!":"Mam go!";
+  $("r-text").textContent="Klucz wyciągnięty w "+grabs+" "+(grabs===1?"chwycie":"chwytach")+". Szuflada "+level+(st<3?". Trzy gwiazdki dostajesz za trafienie za pierwszym razem.":".");
+  $("result").hidden=false;
+}
+
+// ---------- input: drag explores, short still tap grabs ----------
+let down=null;
+function toLogical(e){ const r=cv.getBoundingClientRect(); return [(e.clientX-r.left-ox)/scale,(e.clientY-r.top-oy)/scale]; }
+cv.addEventListener("pointerdown",e=>{ audio(); try{cv.setPointerCapture(e.pointerId);}catch(_){}
+  const [x,y]=toLogical(e); down={x,y,t:performance.now(),moved:0}; finger=[x,y]; explore(x,y); addTrail(x,y); });
+cv.addEventListener("pointermove",e=>{ if(!down) return; const [x,y]=toLogical(e);
+  // sample along the path so fast swipes don't skip teeth
+  const [px,py]=finger, d=Math.hypot(x-px,y-py), steps=Math.max(1,Math.ceil(d/1.5));
+  for(let i=1;i<=steps;i++) explore(px+(x-px)*i/steps, py+(y-py)*i/steps);
+  down.moved+=d; finger=[x,y]; addTrail(x,y); });
+cv.addEventListener("pointerup",e=>{ if(!down) return;
+  if(down.moved<8 && performance.now()-down.t<260) grab(down.x,down.y);
+  down=null; finger=null; cur=null; lastFeat=null; });
+cv.addEventListener("pointercancel",()=>{ down=null; finger=null; cur=null; });
+function addTrail(x,y){ trail.push({x,y,t:performance.now()}); if(trail.length>400) trail.shift(); }
+
+// ---------- drawing ----------
+let scale=1, ox=0, oy=0;
+function resize(){ const r=cv.getBoundingClientRect(), dpr=Math.min(devicePixelRatio||1,2);
+  cv.width=r.width*dpr; cv.height=r.height*dpr;
+  scale=Math.min(r.width/W,r.height/H); ox=(r.width-W*scale)/2; oy=(r.height-H*scale)/2;
+  ctx.setTransform(dpr*scale,0,0,dpr*scale,dpr*ox,dpr*oy); }
+
+function drawItem(it,alpha){
+  ctx.save(); ctx.globalAlpha=alpha; ctx.translate(it.x,it.y); ctx.rotate(it.rot);
+  ctx.lineWidth=1.5; ctx.strokeStyle="#d2a861"; ctx.fillStyle="rgba(210,168,97,.18)";
+  switch(it.type){
+    case "coin": ctx.beginPath(); ctx.arc(0,0,R-2,0,7); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0,0,R*0.62,0,7); ctx.stroke(); break;
+    case "button": ctx.beginPath(); ctx.arc(0,0,R-6,0,7); ctx.fill(); ctx.stroke();
+      for(const [hx,hy] of [[-6,-6],[6,-6],[-6,6],[6,6]]){ ctx.beginPath(); ctx.arc(hx,hy,2.5,0,7); ctx.stroke(); } break;
+    case "clip": ctx.beginPath(); ctx.roundRect?ctx.roundRect(-R+2,-8,2*R-4,16,8):ctx.rect(-R+2,-8,2*R-4,16); ctx.stroke();
+      ctx.beginPath(); ctx.roundRect?ctx.roundRect(-R+7,-4,2*R-14,8,4):ctx.rect(-R+7,-4,2*R-14,8); ctx.stroke(); break;
+    case "marble": ctx.beginPath(); ctx.arc(0,0,R-8,0,7); ctx.fill(); ctx.stroke(); break;
+    default: { ctx.beginPath(); ctx.arc(-R+6,0,7,0,7); ctx.stroke(); ctx.beginPath(); ctx.rect(-R+13,-3,2*R-15,6); ctx.fill(); ctx.stroke();
+      for(const t of TEETH[it.type]){ ctx.beginPath(); ctx.rect(t-2,3,4,5); ctx.fill(); ctx.stroke(); } }
+  }
+  ctx.restore();
+}
+
+function draw(t){
+  const g=ctx.createRadialGradient(W/2,H/2,40,W/2,H/2,H*0.7);
+  g.addColorStop(0,"#2a201b"); g.addColorStop(1,"#151110");
+  ctx.fillStyle=g; ctx.fillRect(-ox/scale,-oy/scale,W+2*ox/scale,H+2*oy/scale);
+  // velvet nap: faint diagonal grain
+  ctx.strokeStyle="rgba(255,240,220,.025)"; ctx.lineWidth=1;
+  for(let i=-H;i<W;i+=9){ ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i+H,H); ctx.stroke(); }
+
+  const now=performance.now();
+  // trail: where your fingertip has already been, fading over a few seconds
+  for(const p of trail){ const a=1-(now-p.t)/2600; if(a<=0) continue;
+    ctx.fillStyle="rgba(239,230,220,"+(a*0.07)+")"; ctx.beginPath(); ctx.arc(p.x,p.y,9,0,7); ctx.fill(); }
+  while(trail.length&&now-trail[0].t>2600) trail.shift();
+
+  for(const it of items) if(it.shown||peek) drawItem(it, it.shown?0.95:0.35);
+
+  if(finger){ const [x,y]=finger, touching=!!cur;
+    ctx.strokeStyle=touching?"rgba(210,168,97,.75)":"rgba(239,230,220,.25)"; ctx.lineWidth=touching?2:1.2;
+    const pulse=touching&&!reduce?Math.sin(t/60)*1.5:0;
+    ctx.beginPath(); ctx.arc(x,y,16+pulse,0,7); ctx.stroke(); }
+  requestAnimationFrame(draw);
+}
+
+// ---------- controls ----------
+$("b-start").onclick=()=>{ audio(); VOICE.bump(); $("start").hidden=true; };
+$("b-tex").onclick=()=>{ audio(); $("textures").hidden=false; };
+$("b-tex-close").onclick=()=>{ $("textures").hidden=true; $("start").hidden=true; };
+document.querySelectorAll("#textures button[data-s]").forEach(b=>b.onclick=()=>{ audio(); const k=b.dataset.s;
+  DEMO[k].forEach(ms=>setTimeout(()=>{ (k==="marble"?VOICE.bump:VOICE[k])(); },ms)); });
+$("b-peek").onclick=e=>{ peek=!peek; e.currentTarget.setAttribute("aria-pressed",peek); };
+$("b-new").onclick=()=>{ seed=(Math.random()*1e9)|0; build(); };
+$("b-next").onclick=()=>{ level++; build(); };
+$("b-retry").onclick=()=>{ build(); };
+addEventListener("resize",resize);
+resize(); build(); requestAnimationFrame(draw);
+})();
+</script>
+
+</body>
+</html>
