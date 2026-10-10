@@ -91,7 +91,7 @@ button.small[aria-pressed="true"]{outline:2px solid var(--accent)}
 
 <script>
 // SLUZA-CORE: terrain, level generation and water simulation (no DOM)
-const GW=20, GH=28, DIG=0.8, DAM=1.6;
+const GW=12, GH=16, DIG=0.8, DAM=1.6;
 function rng(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed);
   t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
 const idx=(x,y)=>y*GW+x;
@@ -107,12 +107,12 @@ function makeNoise(R,cells){ // value noise on a coarse grid, bilinear
 
 function generateLevel(seed,level){
   const R=rng(seed);
-  const n1=makeNoise(R,5), n2=makeNoise(R,3);
+  const n1=makeNoise(R,3), n2=makeNoise(R,2);
   const base=new Float32Array(GW*GH);
   for(let y=0;y<GH;y++) for(let x=0;x<GW;x++)
-    base[idx(x,y)]=(GH-y)*0.3 + (n1(x,y)-.5)*0.9 + (n2(x,y)-.5)*0.25;
+    base[idx(x,y)]=(GH-y)*0.5 + (n1(x,y)-.5)*1.0 + (n2(x,y)-.5)*0.25;
   // spring near the top
-  const sx=4+Math.floor(R()*(GW-8)), sy=1;
+  const sx=2+Math.floor(R()*(GW-4)), sy=1;
   // natural path: steepest descent from the spring
   const path=[]; let cx=sx, cy=sy, guard=0; const seen=new Set();
   while(cy<GH-1 && guard++<200){ path.push([cx,cy]); seen.add(idx(cx,cy));
@@ -128,24 +128,24 @@ function generateLevel(seed,level){
     for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){ const nx=sx+dx, ny=sy+dy; if(!inb(nx,ny)) continue; const j=idx(nx,ny);
       if(j===out) base[j]=Math.min(base[j],base[si]-0.3); else base[j]=Math.max(base[j],base[si]+0.5); } }
   // house sits on the natural path, so doing nothing floods it
-  const houses=[]; const hp=path[Math.min(path.length-1,8+Math.floor(R()*4))];
+  const houses=[]; const hp=path[Math.min(path.length-1,5+Math.floor(R()*2))];
   houses.push({x:hp[0],y:hp[1]});
-  if(level>=3){ const hp2=path[Math.min(path.length-1,16+Math.floor(R()*3))]; if(hp2) houses.push({x:hp2[0],y:hp2[1]}); }
+  if(level>=3){ const hp2=path[Math.min(path.length-1,10+Math.floor(R()*2))]; if(hp2) houses.push({x:hp2[0],y:hp2[1]}); }
   // fields: 2x2 plots away from the natural path, lower than the spring
-  const nf=Math.min(4,1+level), fields=[];
+  const nf=Math.min(3,1+level), fields=[];
   for(let tries=0;tries<500&&fields.length<nf;tries++){
-    const fx=1+Math.floor(R()*(GW-3)), fy=9+Math.floor(R()*(GH-12));
+    const fx=Math.floor(R()*(GW-1)), fy=5+Math.floor(R()*(GH-7));
     const cells=[[fx,fy],[fx+1,fy],[fx,fy+1],[fx+1,fy+1]];
-    const farPath=path.every(([px,py])=>Math.abs(px-fx)+Math.abs(py-fy)>=4);
-    const farOthers=fields.every(f=>Math.abs(f.x-fx)+Math.abs(f.y-fy)>=5)&&houses.every(h=>Math.abs(h.x-fx)+Math.abs(h.y-fy)>=4);
+    const farPath=path.every(([px,py])=>Math.abs(px-fx)+Math.abs(py-fy)>=3);
+    const farOthers=fields.every(f=>Math.abs(f.x-fx)+Math.abs(f.y-fy)>=4)&&houses.every(h=>Math.abs(h.x-fx)+Math.abs(h.y-fy)>=3);
     if(!farPath||!farOthers) continue;
     // flatten the plot into a shallow basin
     let m=Math.min(...cells.map(([x,y])=>base[idx(x,y)]));
     for(const [x,y] of cells) base[idx(x,y)]=m-DIG-0.05; // a field is a shallow basin, as deep as a channel
     fields.push({x:fx,y:fy,cells,need:5,got:0});
   }
-  const water=80+fields.length*32;
-  return {base,stream,spring:{x:sx,y:sy},houses,fields,water,path,budget:24+fields.length*12+level*2};
+  const water=50+fields.length*22;
+  return {base,stream,spring:{x:sx,y:sy},houses,fields,water,path,budget:12+fields.length*8+level};
 }
 
 // ---- simulation ----
@@ -238,7 +238,7 @@ function apply(i){
     if(used()+extra>L.budget){ noShovel(); return; } dig[i]=0; dam[i]=1; }
 }
 function noShovel(){ hint("Skończyły się łopaty. Zasyp zbędne odcinki, żeby odzyskać łopaty."); flash={t:performance.now()}; }
-let drawing=false, lastCell=null;
+let drawing=false, lastCell=null, hover=null;
 function cellAt(e){ const r=cv.getBoundingClientRect(); const x=(e.clientX-r.left-ox)/scale, y=(e.clientY-r.top-oy)/scale;
   return [Math.floor(x/C),Math.floor(y/C)]; }
 function paintTo(cx,cy){
@@ -252,10 +252,10 @@ function paintTo(cx,cy){
   lastCell=[cx,cy];
 }
 cv.addEventListener("pointerdown",e=>{ if(phase!=="edit") return; try{cv.setPointerCapture(e.pointerId);}catch(_){}
-  drawing=true; lastCell=null; const [x,y]=cellAt(e); paintTo(x,y); stats(); });
-cv.addEventListener("pointermove",e=>{ if(!drawing) return; const [x,y]=cellAt(e); if(lastCell&&x===lastCell[0]&&y===lastCell[1]) return; paintTo(x,y); stats(); });
-cv.addEventListener("pointerup",()=>{ drawing=false; lastCell=null; });
-cv.addEventListener("pointercancel",()=>{ drawing=false; lastCell=null; });
+  drawing=true; lastCell=null; const [x,y]=cellAt(e); hover=[x,y]; paintTo(x,y); stats(); });
+cv.addEventListener("pointermove",e=>{ if(!drawing) return; const [x,y]=cellAt(e); hover=[x,y]; if(lastCell&&x===lastCell[0]&&y===lastCell[1]) return; paintTo(x,y); stats(); });
+cv.addEventListener("pointerup",()=>{ drawing=false; lastCell=null; hover=null; });
+cv.addEventListener("pointercancel",()=>{ drawing=false; lastCell=null; hover=null; });
 
 // ---------- running ----------
 function open(){
@@ -358,6 +358,9 @@ function draw(now){
       ctx.beginPath(); ctx.moveTo(cx-best[0]*5,cy-best[1]*5); ctx.lineTo(ex,ey);
       ctx.moveTo(ex,ey); ctx.lineTo(ex-best[0]*3-best[1]*3,ey-best[1]*3-best[0]*3);
       ctx.moveTo(ex,ey); ctx.lineTo(ex-best[0]*3+best[1]*3,ey-best[1]*3+best[0]*3); ctx.stroke(); } }
+  // the cell under the finger, drawn larger than the finger so it stays visible around it
+  if(hover&&inb(hover[0],hover[1])){ ctx.strokeStyle="#ffffff"; ctx.lineWidth=2.5; ctx.strokeRect(hover[0]*C-1,hover[1]*C-1,C+2,C+2);
+    ctx.strokeStyle="rgba(0,0,0,.35)"; ctx.lineWidth=1; ctx.strokeRect(hover[0]*C-3,hover[1]*C-3,C+6,C+6); }
   ctx.restore();
   // shovel warning flash
   if(flash&&now-flash.t<500){ ctx.strokeStyle="rgba(207,75,60,"+(1-(now-flash.t)/500)+")"; ctx.lineWidth=4; ctx.strokeRect(2,2,W-4,H-4); }
